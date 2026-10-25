@@ -69,6 +69,12 @@ export class SimDatabase {
         model TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS server_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
   }
 
@@ -259,6 +265,31 @@ export class SimDatabase {
       };
     }
     return out;
+  }
+
+  public setGlobalEngine(binding: PersonaEngineBinding): void {
+    this.db.run(
+      `INSERT INTO server_settings (key, value, updated_at)
+       VALUES ('global_engine', ?, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = excluded.updated_at`,
+      [JSON.stringify(binding), Date.now()]
+    );
+  }
+
+  public getGlobalEngine(): PersonaEngineBinding | null {
+    const row = this.db
+      .query<{ value: string }, []>(
+        "SELECT value FROM server_settings WHERE key = 'global_engine'"
+      )
+      .get();
+    if (!row) return null;
+    try {
+      return JSON.parse(row.value) as PersonaEngineBinding;
+    } catch {
+      return null;
+    }
   }
 
   public close(): void {

@@ -30,19 +30,19 @@
   - `src/core/room.ts` — `Room`: Manages active personas, connected humans, `<thinking>` stream extraction (`extractThinkingAndBody`), whispers, and the reactive multi-step turn loop (`runRoomTurn`).
   - `src/core/commands.ts` — Slash command definitions (`/summon`, `/banish`, `/provider`, `/models`, `/engine`, `/bind`, `/vibe`, `/banter`, `/stage`, `/whisper`, `/channel`, `/channels`, `/nick`, `/share`, `/unshare`, `/lock`, `/unlock`, `/kickplayer`, `/roster`, `/inspect`, `/shush`, `/clear`, `/help`, `/quit`) and `ChatroomAutocompleteProvider`.
 - `src/server/` — Multiplayer Co-op & Persistence:
-  - `src/server/db.ts` — `SimDatabase` (`bun:sqlite` in WAL mode): Persists `channels`, `channel_bots`, `messages`, `custom_personas`, and `persona_bindings`.
+  - `src/server/db.ts` — `SimDatabase` (`bun:sqlite` in WAL mode): Persists `channels`, `channel_bots`, `messages`, `custom_personas`, `persona_bindings`, and `server_settings` (`global_engine`).
   - `src/server/hub.ts` — `ChannelHub` (`Bun.serve` HTTP + WebSocket server): Enforces `MAX_HUMANS = 4` (DOOM-style 4-player co-op cap), `?key=` passkey validation, per-guest message cooldowns, and multi-channel synchronization.
-  - `src/server/web-client.ts` — Self-contained Retro CRT / IRC HTML/JS browser client served at `GET /?key=<passkey>` for zero-install multiplayer.
+  - `src/server/web-client.ts` — Self-contained Retro CRT / IRC HTML/JS browser client served at `GET /?key=<passkey>` with interactive `<button type="button">` `@Nick` pills, collapsible `<details>` thought traces, and inline markdown rendering.
   - `src/server/tunnel.ts` — `TunnelManager`: Spawns outbound `cloudflared tunnel` for `/share` and detects LAN/Tailscale IPs.
 - `src/ui/` — Terminal UI (`@mariozechner/pi-tui`):
-  - `src/ui/app.ts` — `ChatroomApp` (supports both WebSocket client mode and standalone `Room` mode).
-  - `src/ui/theme.ts` — Retro IRC header, status badges, and inline markdown/thought styling.
+  - `src/ui/app.ts` — `ChatroomApp` (supports both WebSocket client mode and standalone `Room` mode, `PageUp`/`PageDown` scrollback, and animated braille status spinner).
+  - `src/ui/theme.ts` — Retro IRC header, per-persona `(provider:model)` binding badges, and inline markdown/thought styling.
 
 ## Critical Invariants & Provider Contracts
 
 1. **`heylookitsanllm` Contract (`src/engine/providers/heylook.ts`)**:
    - Always use `POST /v1/messages` (Anthropic Messages wire format) and `GET /v1/models`. Never use `/v1/chat/completions` (removed in `heylook` v1.79.66).
-   - Never hardcode model IDs for `heylook`; discover them at runtime via `GET /v1/models`.
+   - Never hardcode model IDs for `heylook`; discover them at runtime via `GET /v1/models` and preload newly selected models via `POST /v1/models/{id}/load`.
    - Keep `defaultModel === fastModel` on `HeylookProvider` so single-slot local servers (`max_loaded_models = 1`) never thrash VRAM between Room Director and Persona turns.
    - Terminate `/v1/messages` SSE streams on `event: message_stop` (there is no `data: [DONE]`), handle in-band `event: error` by throwing (never render `error.message` as assistant text), and retry HTTP `503 model_overloaded` using `Retry-After`.
 2. **Gemini SDK Contract (`src/engine/providers/gemini.ts`)**:

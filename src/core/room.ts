@@ -101,6 +101,18 @@ export class Room {
       this.gemini.setAllPersonaBindings(this.db.loadPersonaBindings());
     }
 
+    if (this.db && !options?.gemini) {
+      const savedGlobal = this.db.getGlobalEngine();
+      if (savedGlobal) {
+        try {
+          this.gemini.activeProvider = savedGlobal.provider;
+          this.gemini.activeModel = savedGlobal.model;
+        } catch {
+          // Ignore unknown saved provider
+        }
+      }
+    }
+
     const existingChan = this.db?.getChannel(this.channelName);
     if (existingChan && this.db) {
       this.vibeKey = existingChan.vibe_key;
@@ -389,6 +401,15 @@ Respond now as <${speaker.nick}>:`;
   ): void {
     this.gemini.bindPersona(personaId, binding);
     this.db?.setPersonaBinding(personaId, binding);
+    this.callbacks?.onPresenceChange?.();
+    this.notify();
+  }
+
+  public persistGlobalEngine(): void {
+    this.db?.setGlobalEngine({
+      provider: this.gemini.activeProvider,
+      model: this.gemini.activeModel,
+    });
     this.callbacks?.onPresenceChange?.();
     this.notify();
   }

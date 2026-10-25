@@ -82,11 +82,16 @@ export function renderIrcHeader(
     })
     .join("  ");
 
+  const bindings = room.gemini.getAllPersonaBindings();
   const botTags =
     room.activePersonas
-      .map((p) =>
-        chalk.hex(p.color || "#8be9fd").bold(`${p.avatar} <${p.nick}>`)
-      )
+      .map((p) => {
+        const b = bindings[p.id.toLowerCase()];
+        const via = b ? chalk.dim(`(${b.provider}:${b.model})`) : "";
+        return (
+          chalk.hex(p.color || "#8be9fd").bold(`${p.avatar} <${p.nick}>`) + via
+        );
+      })
       .join("  ") || chalk.dim("(none — use /summon)");
 
   const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;

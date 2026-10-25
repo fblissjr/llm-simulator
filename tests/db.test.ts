@@ -26,6 +26,10 @@ describe("SQLite Persistence & 28-Persona Catalog", () => {
     });
 
     room1.setVibe("roast");
+    room1.gemini.activeProvider = "openrouter";
+    room1.gemini.activeModel = "anthropic/claude-3.7-sonnet";
+    room1.persistGlobalEngine();
+
     const sydney = reg1.find("sydney")!;
     room1.join(sydney);
     room1.addSystemMessage("Welcome to #retro-lab!", "system", true);
@@ -61,6 +65,8 @@ describe("SQLite Persistence & 28-Persona Catalog", () => {
     });
 
     expect(room2.vibeKey).toBe("roast");
+    expect(room2.gemini.activeProvider).toBe("openrouter");
+    expect(room2.gemini.activeModel).toBe("anthropic/claude-3.7-sonnet");
     expect(room2.activePersonas.map((p) => p.id)).toEqual([
       "eliza",
       "parry",

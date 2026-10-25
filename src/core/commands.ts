@@ -633,6 +633,7 @@ export const COMMANDS: CommandDefinition[] = [
         if (prov.id === "heylook") {
           const models = await prov.listModels();
           if (models.length > 0) {
+            await room.gemini.preloadModel("heylook", prov.defaultModel);
             room.addSystemMessage(
               `🔌 Switched global provider to heylookitsanllm (${prov.baseUrl}) — Active resident model: ${prov.defaultModel} (${models.length} local models discovered).`,
               "event"
@@ -649,7 +650,7 @@ export const COMMANDS: CommandDefinition[] = [
             "event"
           );
         }
-        room.callbacks?.onPresenceChange?.();
+        room.persistGlobalEngine();
       } catch (err) {
         replyToCaller(
           room,
@@ -741,7 +742,11 @@ export const COMMANDS: CommandDefinition[] = [
         },
       ];
       for (const prov of room.gemini.listProviders()) {
-        for (const m of prov.getCachedModels().slice(0, 15)) {
+        const cached = prov.getCachedModels();
+        if (cached.length === 0 && prov.id === "heylook") {
+          void prov.listModels();
+        }
+        for (const m of cached.slice(0, 15)) {
           items.push({
             value: `${personaPart} ${prov.id}:${m.id}`,
             label: `🔗 ${prov.id}:${m.id}`,
@@ -751,7 +756,7 @@ export const COMMANDS: CommandDefinition[] = [
       }
       return filterItems(items, `${personaPart} ${specPrefix}`);
     },
-    execute: (args, room, ctx) => {
+    execute: async (args, room, ctx) => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       if (parts.length === 0) {
         const bindings = room.gemini.getAllPersonaBindings();
@@ -827,6 +832,9 @@ export const COMMANDS: CommandDefinition[] = [
       }
 
       room.bindPersona(persona.id, binding);
+      if (binding.provider === "heylook") {
+        await room.gemini.preloadModel("heylook", binding.model);
+      }
       room.addSystemMessage(
         `🔗 Bound ${persona.avatar} <${persona.nick}> to ${binding.provider}:${binding.model} (using ${persona.nick}'s simulated persona prompt).`,
         "event"
@@ -863,7 +871,11 @@ export const COMMANDS: CommandDefinition[] = [
         }
       }
       for (const prov of room.gemini.listProviders()) {
-        for (const m of prov.getCachedModels().slice(0, 8)) {
+        const cached = prov.getCachedModels();
+        if (cached.length === 0 && prov.id === "heylook") {
+          void prov.listModels();
+        }
+        for (const m of cached.slice(0, 8)) {
           items.push({
             value: `${prov.id}:${m.id}`,
             label: `🔌 ${prov.id}:${m.id}`,
@@ -873,7 +885,7 @@ export const COMMANDS: CommandDefinition[] = [
       }
       return filterItems(items, prefix);
     },
-    execute: (args, room, ctx) => {
+    execute: async (args, room, ctx) => {
       const rawChoice = args.trim();
       const choice = rawChoice.toLowerCase();
       if (!rawChoice) {
@@ -903,7 +915,10 @@ export const COMMANDS: CommandDefinition[] = [
           return;
         }
       }
-      room.callbacks?.onPresenceChange?.();
+      if (room.gemini.activeProvider === "heylook") {
+        await room.gemini.preloadModel("heylook", room.gemini.activeModel);
+      }
+      room.persistGlobalEngine();
       room.addSystemMessage(
         `Switched underlying simulation engine to ${room.gemini.activeEngineLabel}`,
         "event"

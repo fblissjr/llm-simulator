@@ -62,6 +62,7 @@ bun run server --port 4321
 - `/inspect <model>`: Inspect a model's full persona sheet, bound engine, and system prompt
 - `/shush` (or `Esc`): Interrupt any currently streaming turn
 - `/clear`, `/help`, `/quit`
+- **Keyboard Shortcuts (Terminal TUI)**: `Tab` (autocomplete `/commands`, models, `@Human`, and `@Bot`), `PgUp` / `PgDn` (scroll through SQLite channel history), `Esc` (interrupt streaming), `Ctrl+C` (exit).
 
 ## Extending Personas
 

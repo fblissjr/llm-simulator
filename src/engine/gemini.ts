@@ -264,14 +264,34 @@ export class InferenceRouter {
 
   /**
    * Probes local heylook server on startup if no cloud API key is configured,
-   * automatically switching to heylook if it responds on :8000.
+   * automatically switching to heylook if it responds on :8000, and warms model caches
+   * for Tab-autocomplete.
    */
   public async autoDetectLocalProviders(): Promise<void> {
     const heylook = this.providers.get("heylook");
-    if (!heylook) return;
-    const models = await heylook.listModels();
-    if (models.length > 0 && !this.getProvider().isConfigured()) {
-      this._activeProviderId = "heylook";
+    if (heylook) {
+      const models = await heylook.listModels();
+      if (models.length > 0 && !this.getProvider().isConfigured()) {
+        this._activeProviderId = "heylook";
+      }
+    }
+    const openrouter = this.providers.get("openrouter");
+    if (openrouter?.isConfigured()) {
+      void openrouter.listModels();
+    }
+  }
+
+  /**
+   * If the target provider supports explicit model preloading (e.g. POST /v1/models/{id}/load on heylook),
+   * triggers preload so cold model loads happen upfront rather than stalling the first turn.
+   */
+  public async preloadModel(
+    providerId: ProviderId,
+    modelId: string
+  ): Promise<void> {
+    const prov = this.providers.get(providerId.toLowerCase());
+    if (prov && prov instanceof HeylookProvider && modelId && modelId !== "auto") {
+      await prov.preloadModel(modelId);
     }
   }
 

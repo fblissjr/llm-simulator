@@ -42,6 +42,11 @@ export class ChatroomApp {
   private localInviteUrl?: string;
   private maxHumans = 4;
   private apiOnline?: boolean;
+  private scrollOffset = 0;
+  private spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  private spinnerIndex = 0;
+  private spinnerTimer: ReturnType<typeof setInterval> | null = null;
+  private isStarted = false;
 
   private headerView: Text;
   private feedView: Text;
@@ -307,6 +312,7 @@ export class ChatroomApp {
       const text = rawText.trim();
       if (!text) return;
 
+      this.scrollOffset = 0;
       this.editor.addToHistory(text);
       this.editor.setText("");
       this.tui.requestRender();
@@ -317,6 +323,19 @@ export class ChatroomApp {
     this.tui.addInputListener((data) => {
       if (matchesKey(data, "ctrl+c") || matchesKey(data, "ctrl+d")) {
         this.quit();
+        return { consume: true };
+      }
+
+      if (matchesKey(data, "pageUp")) {
+        const maxOffset = Math.max(0, this.room.messages.length - 10);
+        this.scrollOffset = Math.min(maxOffset, this.scrollOffset + 10);
+        this.syncViews();
+        return { consume: true };
+      }
+
+      if (matchesKey(data, "pageDown")) {
+        this.scrollOffset = Math.max(0, this.scrollOffset - 10);
+        this.syncViews();
         return { consume: true };
       }
 
@@ -378,8 +397,11 @@ export class ChatroomApp {
       })
     );
 
+    const total = this.room.messages.length;
+    const endIdx = Math.max(0, total - this.scrollOffset);
+    const startIdx = Math.max(0, endIdx - 45);
     const renderedMessages = this.room.messages
-      .slice(-45)
+      .slice(startIdx, endIdx)
       .map((m) => formatChatMessage(m))
       .join("\n\n");
 
@@ -388,13 +410,29 @@ export class ChatroomApp {
     );
 
     if (this.room.statusText) {
+      if (this.isStarted && !this.spinnerTimer) {
+        this.spinnerTimer = setInterval(() => {
+          this.spinnerIndex =
+            (this.spinnerIndex + 1) % this.spinnerFrames.length;
+          this.syncViews();
+        }, 90);
+      }
+      const frame = this.spinnerFrames[this.spinnerIndex] ?? "⏳";
       this.statusView.setText(
-        chalk.hex("#f1fa8c")(`  ⏳ ${this.room.statusText}`)
+        chalk.hex("#f1fa8c")(`  ${frame} ${this.room.statusText}`)
       );
     } else {
+      if (this.spinnerTimer) {
+        clearInterval(this.spinnerTimer);
+        this.spinnerTimer = null;
+      }
+      const scrollBadge =
+        this.scrollOffset > 0
+          ? chalk.hex("#ffb86c")(` [Scrolled +${this.scrollOffset} msgs • PgDn to return] `)
+          : "";
       this.statusView.setText(
         chalk.hex("#6272a4")(
-          `  ── [@${this.selfNick}] Type a message or /command (Tab: autocomplete • Esc: shush • Ctrl+C: quit) ──`
+          `  ── [@${this.selfNick}]${scrollBadge} Type a message or /command (Tab: autocomplete • PgUp/PgDn: scroll • Esc: shush) ──`
         )
       );
     }
@@ -403,6 +441,7 @@ export class ChatroomApp {
   }
 
   public start(): void {
+    this.isStarted = true;
     if (this.wsUrl) {
       this.connectWebSocket();
     }
@@ -410,6 +449,11 @@ export class ChatroomApp {
   }
 
   public quit(): void {
+    this.isStarted = false;
+    if (this.spinnerTimer) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = null;
+    }
     if (this.ws) {
       try {
         this.ws.close();

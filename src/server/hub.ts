@@ -53,6 +53,17 @@ export class ChannelHub {
   }) {
     this.db = new SimDatabase(options?.dbPath);
     this.gemini = options?.gemini ?? new GeminiEngine();
+    if (!options?.gemini) {
+      const savedGlobal = this.db.getGlobalEngine();
+      if (savedGlobal) {
+        try {
+          this.gemini.activeProvider = savedGlobal.provider;
+          this.gemini.activeModel = savedGlobal.model;
+        } catch {
+          // Ignore unknown saved provider
+        }
+      }
+    }
     this.registry = new PersonaRegistry(undefined, this.db);
     this.director = new RoomDirector();
     this.passkey =

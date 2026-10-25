@@ -46,6 +46,13 @@ export function renderWebClientHtml(): string {
       gap: 10px;
       justify-content: space-between;
     }
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      font-size: 14px;
+    }
     .chan-badge {
       background: #282a36;
       color: var(--green);
@@ -53,6 +60,10 @@ export function renderWebClientHtml(): string {
       padding: 3px 8px;
       border: 1px solid var(--green);
       border-radius: 4px;
+    }
+    .vibe-badge {
+      color: var(--orange);
+      font-weight: 700;
     }
     .meta-badges {
       display: flex;
@@ -68,15 +79,29 @@ export function renderWebClientHtml(): string {
       align-items: center;
       font-size: 12px;
     }
-    .pill {
-      padding: 2px 7px;
+    button.pill {
+      padding: 2px 8px;
       border-radius: 4px;
       background: #282a36;
-      border: 1px solid var(--border);
+      border: 1px solid var(--persona-color, var(--border));
+      color: var(--persona-color, var(--fg));
+      font-family: inherit;
+      font-size: 12px;
       white-space: nowrap;
+      cursor: pointer;
     }
-    .pill.human { border-color: var(--green); color: var(--green); }
-    #feed {
+    button.pill:hover {
+      filter: brightness(1.2);
+    }
+    button.pill.human {
+      --persona-color: var(--green);
+    }
+    .pill-via {
+      color: var(--muted);
+      font-size: 11px;
+      margin-left: 4px;
+    }
+    main#feed {
       flex: 1;
       overflow-y: auto;
       padding: 14px;
@@ -90,18 +115,46 @@ export function renderWebClientHtml(): string {
       word-break: break-word;
     }
     .msg .ts { color: var(--muted); margin-right: 6px; }
-    .msg .nick { font-weight: 700; }
+    .msg .nick {
+      font-weight: 700;
+      color: var(--persona-color, var(--cyan));
+    }
+    .msg.user .nick { color: var(--green); }
     .msg .family { color: var(--muted); font-size: 12px; margin-left: 6px; }
-    .msg .thinking {
-      color: var(--muted);
-      font-style: italic;
-      border-left: 2px solid var(--border);
+    details.thinking-box {
       margin: 4px 0 4px 12px;
+      border-left: 2px solid var(--border);
       padding-left: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    details.thinking-box > summary {
+      cursor: pointer;
+      user-select: none;
+      font-style: italic;
+      color: var(--muted);
+    }
+    details.thinking-box[open] > summary {
+      margin-bottom: 4px;
+    }
+    details.thinking-box::details-content {
+      font-style: italic;
+      color: var(--muted);
     }
     .msg .body { margin-top: 2px; padding-left: 10px; }
+    .msg .body code {
+      color: var(--yellow);
+      background: #282a36;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+    .msg .stream-cursor { color: var(--green); }
     .msg.event { color: var(--yellow); }
     .msg.system { color: var(--cyan); }
+    footer {
+      display: flex;
+      flex-direction: column;
+    }
     #status-bar {
       padding: 6px 14px;
       background: var(--panel);
@@ -136,6 +189,11 @@ export function renderWebClientHtml(): string {
       padding: 8px 14px;
       gap: 8px;
     }
+    .self-nick {
+      color: var(--green);
+      font-weight: 700;
+      align-self: center;
+    }
     input[type="text"] {
       flex: 1;
       background: transparent;
@@ -160,36 +218,40 @@ export function renderWebClientHtml(): string {
 <body>
   <header>
     <div class="header-top">
-      <div>
+      <h1 class="header-title">
         <span class="chan-badge" id="chan-name">#latent-space</span>
-        <span id="vibe-badge" style="color: var(--orange); margin-left: 8px; font-weight: bold;">Vibe: CHAT</span>
-      </div>
+        <span class="vibe-badge" id="vibe-badge">Vibe: CHAT</span>
+      </h1>
       <div class="meta-badges">
-        <span id="engine-badge">Engine: gemini-3.8-flash</span>
-        <span id="player-count">Humans: 1/4</span>
+        <span id="engine-badge">Engine: gemini:gemini-3.8-flash</span>
+        <span id="player-count">4-Player DOOM Co-op [1/4]</span>
       </div>
     </div>
     <div class="roster-row" id="roster-bar">Connecting...</div>
   </header>
 
-  <div id="feed"></div>
-  <div id="status-bar">Connecting to llm-sim lobby...</div>
+  <main id="feed"></main>
 
-  <div class="quick-bar">
-    <button class="quick-btn" data-cmd="/roster">📜 /roster</button>
-    <button class="quick-btn" data-cmd="/banter 2">🍿 /banter 2</button>
-    <button class="quick-btn" data-cmd="/vibe roast">🔥 /vibe roast</button>
-    <button class="quick-btn" data-cmd="/vibe debate">⚖️ /vibe debate</button>
-    <button class="quick-btn" data-cmd="/shush">🤫 /shush</button>
-    <button class="quick-btn" data-cmd="/channels">📡 /channels</button>
-    <button class="quick-btn" data-cmd="/help">❓ /help</button>
-  </div>
+  <footer>
+    <div id="status-bar">Connecting to llm-sim lobby...</div>
 
-  <form id="chat-form">
-    <span id="self-nick-label" style="color: var(--green); font-weight: bold; align-self: center;">@guest&gt;</span>
-    <input id="chat-input" type="text" placeholder="Type a message, @Nick, or /summon <model>..." autocomplete="off" autofocus />
-    <button class="send" type="submit">Send</button>
-  </form>
+    <div class="quick-bar">
+      <button type="button" class="quick-btn" data-cmd="/roster">📜 /roster</button>
+      <button type="button" class="quick-btn" data-cmd="/banter 2">🍿 /banter 2</button>
+      <button type="button" class="quick-btn" data-cmd="/vibe roast">🔥 /vibe roast</button>
+      <button type="button" class="quick-btn" data-cmd="/vibe debate">⚖️ /vibe debate</button>
+      <button type="button" class="quick-btn" data-cmd="/models">📦 /models</button>
+      <button type="button" class="quick-btn" data-cmd="/shush">🤫 /shush</button>
+      <button type="button" class="quick-btn" data-cmd="/channels">📡 /channels</button>
+      <button type="button" class="quick-btn" data-cmd="/help">❓ /help</button>
+    </div>
+
+    <form id="chat-form">
+      <label for="chat-input" id="self-nick-label" class="self-nick">@guest&gt;</label>
+      <input id="chat-input" type="text" placeholder="Type a message, click a @Nick pill above, or run /summon <model>..." autofocus />
+      <button class="send" type="submit">Send</button>
+    </form>
+  </footer>
 
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -216,7 +278,13 @@ export function renderWebClientHtml(): string {
     const ws = new WebSocket(proto + "//" + window.location.host + "/ws?key=" + encodeURIComponent(key) + "&nick=" + encodeURIComponent(storedNick));
 
     function escapeHtml(s) {
-      return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function formatInlineMarkdown(s) {
+      return escapeHtml(s)
+        .replace(/\`([^\`]+)\`/g, "<code>$1</code>")
+        .replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>");
     }
 
     function renderMessageNode(m) {
@@ -230,21 +298,24 @@ export function renderWebClientHtml(): string {
       el.className = "msg " + m.kind;
 
       if (m.kind === "event") {
-        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> *** ' + escapeHtml(m.text);
+        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> *** ' + formatInlineMarkdown(m.text);
       } else if (m.kind === "system") {
-        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <b>[SYS]</b> ' + escapeHtml(m.text);
+        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <strong>[SYS]</strong> ' + formatInlineMarkdown(m.text);
       } else if (m.kind === "user") {
-        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick" style="color: var(--green)">&lt;' + escapeHtml(m.senderNick) + '&gt;</span> ' + escapeHtml(m.text);
+        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(m.senderNick) + '&gt;</span> ' + formatInlineMarkdown(m.text);
       } else {
         const col = m.color || "#8be9fd";
+        el.style.setProperty("--persona-color", col);
         const av = m.avatar ? m.avatar + " " : "";
         const fam = m.familyTag ? '<span class="family">[' + escapeHtml(m.familyTag) + ']</span>' : "";
-        const thinkHtml = m.thinking ? '<div class="thinking">💭 ' + escapeHtml(m.thinking) + '</div>' : "";
-        const cursor = m.streaming ? ' <span style="color:var(--green)">▍</span>' : "";
+        const thinkHtml = m.thinking
+          ? '<details class="thinking-box" open><summary>💭 Thinking Trace</summary><div class="thinking-content">' + escapeHtml(m.thinking) + '</div></details>'
+          : "";
+        const cursor = m.streaming ? ' <span class="stream-cursor">▍</span>' : "";
         el.innerHTML =
-          '<div><span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick" style="color:' + escapeHtml(col) + '">&lt;' + escapeHtml(av + m.senderNick) + '&gt;</span>' + fam + '</div>' +
+          '<div><span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(av + m.senderNick) + '&gt;</span>' + fam + '</div>' +
           thinkHtml +
-          '<div class="body">' + escapeHtml(m.text || (m.streaming ? "..." : "")) + cursor + '</div>';
+          '<div class="body">' + formatInlineMarkdown(m.text || (m.streaming ? "..." : "")) + cursor + '</div>';
       }
       if (isNew || m.streaming) {
         feedEl.scrollTop = feedEl.scrollHeight;
@@ -256,16 +327,30 @@ export function renderWebClientHtml(): string {
       vibeEl.textContent = "Vibe: " + state.vibeKey.toUpperCase() + (state.locked ? " 🔒" : "");
       const provPrefix = state.activeProvider ? state.activeProvider + ":" : "";
       engineEl.textContent = "Engine: " + provPrefix + state.engineModel;
-      countEl.textContent = "Humans: " + state.humans.length + "/" + (state.maxHumans || 4);
+      countEl.textContent = "4-Player DOOM Co-op [" + state.humans.length + "/" + (state.maxHumans || 4) + "]";
 
+      const bindings = state.personaBindings || {};
       const humanPills = state.humans.map(h =>
-        '<span class="pill human">@' + escapeHtml(h.nick) + (h.isHost ? " ★" : "") + '</span>'
+        '<button type="button" class="pill human" data-mention="@' + escapeHtml(h.nick) + '">@' + escapeHtml(h.nick) + (h.isHost ? " ★" : "") + '</button>'
       );
-      const botPills = state.activePersonas.map(p =>
-        '<span class="pill" style="border-color:' + escapeHtml(p.color) + ';color:' + escapeHtml(p.color) + '">' + escapeHtml(p.avatar + " <" + p.nick + ">") + '</span>'
-      );
+      const botPills = state.activePersonas.map(p => {
+        const b = bindings[String(p.id).toLowerCase()];
+        const viaBadge = b ? '<span class="pill-via">(' + escapeHtml(b.provider + ":" + b.model) + ')</span>' : "";
+        return '<button type="button" class="pill bot" data-mention="@' + escapeHtml(p.nick) + '" style="--persona-color:' + escapeHtml(p.color) + '">' +
+          escapeHtml(p.avatar + " <" + p.nick + ">") + viaBadge + '</button>';
+      });
       rosterEl.innerHTML = humanPills.concat(botPills).join("");
     }
+
+    rosterEl.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("button[data-mention]");
+      if (!btn) return;
+      const mention = btn.getAttribute("data-mention");
+      if (!mention) return;
+      const cur = inputEl.value;
+      inputEl.value = cur ? cur.replace(/\\s*$/, " ") + mention + " " : mention + " ";
+      inputEl.focus();
+    });
 
     ws.onmessage = (ev) => {
       const pkt = JSON.parse(ev.data);
@@ -292,6 +377,7 @@ export function renderWebClientHtml(): string {
           vibeKey: pkt.vibeKey,
           activeProvider: pkt.activeProvider,
           engineModel: pkt.engineModel,
+          personaBindings: pkt.personaBindings,
           locked: pkt.locked,
           humans: pkt.humans,
           maxHumans: 4,
@@ -310,29 +396,29 @@ export function renderWebClientHtml(): string {
       }
     };
 
-    ws.onclose = (ev) => {
-      statusEl.textContent = "Disconnected from server (" + (ev.reason || "closed") + "). Refresh to reconnect.";
+    ws.onclose = () => {
+      statusEl.textContent = "Disconnected from host server.";
     };
 
-    formEl.onsubmit = (e) => {
+    formEl.addEventListener("submit", (e) => {
       e.preventDefault();
-      const val = inputEl.value.trim();
-      if (!val || ws.readyState !== WebSocket.OPEN) return;
-      if (val.startsWith("/")) {
-        ws.send(JSON.stringify({ type: "command", raw: val }));
+      const text = inputEl.value.trim();
+      if (!text || ws.readyState !== WebSocket.OPEN) return;
+      if (text.startsWith("/")) {
+        ws.send(JSON.stringify({ type: "command", raw: text }));
       } else {
-        ws.send(JSON.stringify({ type: "chat", text: val }));
+        ws.send(JSON.stringify({ type: "chat", text }));
       }
       inputEl.value = "";
-    };
+    });
 
     document.querySelectorAll(".quick-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         const cmd = btn.getAttribute("data-cmd");
         if (cmd && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "command", raw: cmd }));
-          inputEl.focus();
         }
+        inputEl.focus();
       });
     });
   </script>
