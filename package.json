@@ -1,0 +1,21 @@
+{
+  "name": "llm-sim",
+  "version": "0.1.0",
+  "description": "Retro IRC / BBS terminal chatroom game where you summon and direct LLMs across history (1966–2026)",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@google/genai": "^2.29.1",
+    "@mariozechner/pi-tui": "latest",
+    "chalk": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.8.2"
+  }
+}
