@@ -1,10 +1,12 @@
 {
   "name": "llm-sim",
-  "version": "0.1.0",
-  "description": "Retro IRC / BBS terminal chatroom game where you summon and direct LLMs across history (1966–2026)",
+  "version": "0.2.0",
+  "description": "4-Player Co-op Retro IRC / BBS terminal & browser chatroom game where you summon and direct 28+ LLMs across history (1966–2026)",
   "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
+    "server": "bun run src/index.ts server",
+    "connect": "bun run src/index.ts connect",
     "dev": "bun --watch run src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"

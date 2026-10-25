@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { GeminiEngine } from "../engine/gemini.ts";
+import type { SimDatabase } from "../server/db.ts";
 import type { Persona } from "../types.ts";
 import { BUILTIN_PERSONAS } from "./builtin.ts";
 
@@ -70,13 +71,23 @@ const PERSONA_SCHEMA: Record<string, unknown> = {
 export class PersonaRegistry {
   private personas = new Map<string, Persona>();
   private customDir: string;
+  private db?: SimDatabase;
 
-  constructor(customDir = path.resolve(process.cwd(), "personas")) {
+  constructor(
+    customDir = path.resolve(process.cwd(), "personas"),
+    db?: SimDatabase
+  ) {
     this.customDir = customDir;
+    this.db = db;
     for (const p of BUILTIN_PERSONAS) {
       this.personas.set(p.id.toLowerCase(), p);
     }
     this.loadCustomPersonas();
+    if (this.db) {
+      for (const p of this.db.loadCustomPersonas()) {
+        this.personas.set(p.id.toLowerCase(), p);
+      }
+    }
   }
 
   public loadCustomPersonas(): void {
@@ -164,6 +175,9 @@ export class PersonaRegistry {
 
   public register(persona: Persona, persistToDisk = false): void {
     this.personas.set(persona.id.toLowerCase(), persona);
+    if (this.db) {
+      this.db.saveCustomPersona(persona);
+    }
     if (persistToDisk) {
       try {
         fs.mkdirSync(this.customDir, { recursive: true });

@@ -4,8 +4,8 @@ import type {
   SelectListTheme,
 } from "@mariozechner/pi-tui";
 import chalk from "chalk";
-import type { ChatMessage } from "../types.ts";
 import type { Room } from "../core/room.ts";
+import type { ChatMessage } from "../types.ts";
 
 export const selectListTheme: SelectListTheme = {
   selectedPrefix: (t) => chalk.hex("#50fa7b").bold(t),
@@ -37,33 +37,78 @@ export const markdownTheme: MarkdownTheme = {
   underline: (t) => chalk.underline(t),
 };
 
-export function renderIrcHeader(room: Room): string {
-  const title = chalk.bgHex("#282a36").hex("#50fa7b").bold(` ${room.channelName} `);
-  const vibeBadge = chalk
-    .hex("#ffb86c")
-    .bold(`Vibe: ${room.vibeKey.toUpperCase()}`);
-  const engineBadge = chalk
-    .hex("#8be9fd")(`Engine: ${room.gemini.activeModel}`);
-  const apiStatus = room.gemini.isConfigured()
+export interface HeaderRenderOptions {
+  selfNick?: string;
+  locked?: boolean;
+  shareUrl?: string | null;
+  localInviteUrl?: string;
+  maxHumans?: number;
+  apiOnline?: boolean;
+}
+
+export function renderIrcHeader(
+  room: Room,
+  opts?: HeaderRenderOptions
+): string {
+  const title = chalk
+    .bgHex("#282a36")
+    .hex("#50fa7b")
+    .bold(` ${room.channelName} `);
+  const lockIcon = opts?.locked ? chalk.hex("#ff5555")(" 🔒") : "";
+  const vibeBadge =
+    chalk.hex("#ffb86c").bold(`Vibe: ${room.vibeKey.toUpperCase()}`) + lockIcon;
+  const engineBadge = chalk.hex("#8be9fd")(
+    `Engine: ${room.gemini.activeEngineLabel}`
+  );
+  const isOnline = opts?.apiOnline ?? room.gemini.isConfigured();
+  const apiStatus = isOnline
     ? chalk.hex("#50fa7b")("● ONLINE")
     : chalk.hex("#ff5555")("○ NO API KEY");
 
-  const nicks = [
-    chalk.hex("#50fa7b").bold("@User"),
-    ...room.activePersonas.map((p) =>
-      chalk.hex(p.color || "#8be9fd").bold(`${p.avatar} <${p.nick}>`)
-    ),
-  ].join("  ");
+  const maxH = opts?.maxHumans ?? 4;
+  const humanList =
+    room.humans.length > 0
+      ? room.humans
+      : [{ nick: opts?.selfNick ?? "User", isHost: true, channel: room.channelName }];
 
-  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
-  const rosterLine = `${chalk.hex("#6272a4")("╠══")} ${chalk.dim(
-    `In Room [${room.activePersonas.length + 1}]:`
-  )} ${nicks}`;
-  const hintLine = `${chalk.hex("#6272a4")("╚══")} ${chalk.dim(
-    "Commands: /summon <model> • /banish <model> • /vibe <mode> • /banter • /roster • /stage • /whisper • /help"
-  )}`;
+  const humanTags = humanList
+    .map((h) => {
+      const star = h.isHost ? "★" : "";
+      const isMe =
+        opts?.selfNick && h.nick.toLowerCase() === opts.selfNick.toLowerCase();
+      return isMe
+        ? chalk.hex("#50fa7b").bold(`@${h.nick}${star}`)
+        : chalk.hex("#8be9fd")(`@${h.nick}${star}`);
+    })
+    .join("  ");
+
+  const botTags =
+    room.activePersonas
+      .map((p) =>
+        chalk.hex(p.color || "#8be9fd").bold(`${p.avatar} <${p.nick}>`)
+      )
+      .join("  ") || chalk.dim("(none — use /summon)");
+
+  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
+  const rosterLine = `${chalk.hex("#6272a4")("╠══")} ${chalk.dim("Humans:")} ${humanTags} ${chalk.hex("#6272a4")("│")} ${chalk.dim(`AIs [${room.activePersonas.length}]:`)} ${botTags}`;
+
+  const inviteInfo = opts?.shareUrl
+    ? `${chalk.hex("#50fa7b")("🌍 Public Invite:")} ${chalk.underline(opts.shareUrl)}`
+    : opts?.localInviteUrl
+      ? `${chalk.dim("LAN Browser Invite:")} ${chalk.hex("#8be9fd")(opts.localInviteUrl)} ${chalk.dim("(/share for public link)")}`
+      : chalk.dim(
+          "Commands: /summon • /banish • /vibe • /banter • /channel #name • /share • /roster • /help"
+        );
+
+  const hintLine = `${chalk.hex("#6272a4")("╚══")} ${inviteInfo}`;
 
   return `${topLine}\n${rosterLine}\n${hintLine}`;
+}
+
+function styleInlineMarkdown(text: string): string {
+  return text
+    .replace(/`([^`]+)`/g, (_m, code) => chalk.hex("#f1fa8c")(`\`${code}\``))
+    .replace(/\*\*([^*]+)\*\*/g, (_m, bold) => chalk.bold(bold));
 }
 
 export function formatChatMessage(msg: ChatMessage): string {
@@ -78,7 +123,10 @@ export function formatChatMessage(msg: ChatMessage): string {
   }
 
   if (msg.kind === "user") {
-    return `${ts} ${chalk.hex("#50fa7b").bold("<@User>")} ${chalk.hex("#f8f8f2")(msg.text)}`;
+    const nickTag = msg.senderNick.startsWith("@")
+      ? msg.senderNick
+      : `@${msg.senderNick}`;
+    return `${ts} ${chalk.hex("#50fa7b").bold(`<${nickTag}>`)} ${chalk.hex("#f8f8f2")(msg.text)}`;
   }
 
   const nickColor = chalk.hex(msg.color || "#8be9fd").bold;
@@ -100,7 +148,7 @@ export function formatChatMessage(msg: ChatMessage): string {
   }
 
   if (msg.text) {
-    parts.push(`  ${msg.text}${streamingCursor}`);
+    parts.push(`  ${styleInlineMarkdown(msg.text)}${streamingCursor}`);
   } else if (msg.streaming) {
     parts.push(`  ${chalk.dim("...")}${streamingCursor}`);
   }

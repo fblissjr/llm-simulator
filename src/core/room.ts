@@ -1,13 +1,18 @@
 import { RoomDirector } from "../engine/director.ts";
 import { GeminiEngine } from "../engine/gemini.ts";
 import { PersonaRegistry } from "../personas/registry.ts";
-import type { ChatMessage, Persona } from "../types.ts";
+import type { SimDatabase } from "../server/db.ts";
+import type {
+  ChatMessage,
+  HumanPlayer,
+  Persona,
+  PersonaEngineBinding,
+} from "../types.ts";
 
 export function extractThinkingAndBody(raw: string): {
   thinking?: string;
   body: string;
 } {
-  // Support <thinking>...</thinking> or <think>...</think>
   const closedMatch = raw.match(
     /^\s*<(?:thinking|think)>([\s\S]*?)<\/(?:thinking|think)>\s*([\s\S]*)$/i
   );
@@ -18,7 +23,6 @@ export function extractThinkingAndBody(raw: string): {
     };
   }
 
-  // Still streaming inside an unclosed <thinking> tag
   const openMatch = raw.match(/^\s*<(?:thinking|think)>([\s\S]*)$/i);
   if (openMatch) {
     return {
@@ -37,7 +41,7 @@ export function formatTime(date = new Date()): string {
 }
 
 export const VIBE_PRESETS: Record<string, string> = {
-  chat: "Casual late-night IRC hangout in #latent-space. Be authentic to your era and quirks, and react naturally to other models.",
+  chat: "Casual late-night IRC hangout in #latent-space. Be authentic to your era and quirks, and react naturally to humans and other models.",
   debate:
     "Fierce intellectual debate! Take strong, contrasting stances based on your architecture and era, and challenge the previous speaker's claims.",
   roast:
@@ -46,17 +50,27 @@ export const VIBE_PRESETS: Record<string, string> = {
     "Maximum latent-space chaos! Amplify your weirdest era-specific failure modes, hallucinations, and existential quirks to 11.",
 };
 
+export interface RoomEventCallbacks {
+  onMessageUpsert?: (msg: ChatMessage) => void;
+  onMessageClear?: () => void;
+  onPresenceChange?: () => void;
+  onStatusChange?: (statusText: string) => void;
+}
+
 export class Room {
-  public channelName = "#latent-space";
+  public channelName: string;
   public vibeKey = "chat";
   public vibe: string = VIBE_PRESETS.chat!;
   public activePersonas: Persona[] = [];
+  public humans: HumanPlayer[] = [];
   public messages: ChatMessage[] = [];
   public statusText = "";
 
   public readonly registry: PersonaRegistry;
   public readonly gemini: GeminiEngine;
   public readonly director: RoomDirector;
+  public readonly db?: SimDatabase;
+  public callbacks?: RoomEventCallbacks;
 
   private whispers = new Map<string, string[]>();
   private abortController: AbortController | null = null;
@@ -64,25 +78,58 @@ export class Room {
   private msgCounter = 0;
 
   constructor(options?: {
+    channelName?: string;
     registry?: PersonaRegistry;
     gemini?: GeminiEngine;
     director?: RoomDirector;
+    db?: SimDatabase;
     starterIds?: string[];
+    callbacks?: RoomEventCallbacks;
   }) {
-    this.registry = options?.registry ?? new PersonaRegistry();
+    this.channelName = options?.channelName ?? "#latent-space";
+    this.db = options?.db;
+    this.registry =
+      options?.registry ?? new PersonaRegistry(undefined, this.db);
     this.gemini = options?.gemini ?? new GeminiEngine();
     this.director = options?.director ?? new RoomDirector();
+    this.callbacks = options?.callbacks;
 
-    const starters = options?.starterIds ?? [
-      "sydney",
-      "opus-5.5",
-      "sonnet-3.5",
-      "gpt-2",
-    ];
-    for (const id of starters) {
-      const p = this.registry.find(id);
-      if (p) {
-        this.activePersonas.push(p);
+    if (
+      this.db &&
+      Object.keys(this.gemini.getAllPersonaBindings()).length === 0
+    ) {
+      this.gemini.setAllPersonaBindings(this.db.loadPersonaBindings());
+    }
+
+    const existingChan = this.db?.getChannel(this.channelName);
+    if (existingChan && this.db) {
+      this.vibeKey = existingChan.vibe_key;
+      this.vibe = existingChan.vibe;
+      const savedBotIds = this.db.getChannelBotIds(this.channelName);
+      for (const id of savedBotIds) {
+        const p = this.registry.find(id);
+        if (p) this.activePersonas.push(p);
+      }
+      this.messages = this.db.getChannelMessages(this.channelName, 80);
+    } else {
+      const starters = options?.starterIds ?? [
+        "sydney",
+        "opus-5.5",
+        "sonnet-3.5",
+        "gpt-2",
+      ];
+      for (const id of starters) {
+        const p = this.registry.find(id);
+        if (p) {
+          this.activePersonas.push(p);
+        }
+      }
+      if (this.db) {
+        this.db.upsertChannel(this.channelName, this.vibeKey, this.vibe);
+        this.db.setChannelBotIds(
+          this.channelName,
+          this.activePersonas.map((p) => p.id)
+        );
       }
     }
   }
@@ -98,12 +145,37 @@ export class Room {
     }
   }
 
-  private nextId(): string {
-    this.msgCounter += 1;
-    return `msg-${Date.now()}-${this.msgCounter}`;
+  private setStatus(text: string): void {
+    this.statusText = text;
+    this.callbacks?.onStatusChange?.(text);
+    this.notify();
   }
 
-  public addSystemMessage(text: string, kind: "system" | "event" = "system"): ChatMessage {
+  private nextId(): string {
+    this.msgCounter += 1;
+    return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${this.msgCounter}`;
+  }
+
+  private recordMessage(msg: ChatMessage, persist = true): ChatMessage {
+    const existingIdx = this.messages.findIndex((m) => m.id === msg.id);
+    if (existingIdx >= 0) {
+      this.messages[existingIdx] = msg;
+    } else {
+      this.messages.push(msg);
+    }
+    if (persist && this.db) {
+      this.db.upsertMessage(this.channelName, msg);
+    }
+    this.callbacks?.onMessageUpsert?.(msg);
+    this.notify();
+    return msg;
+  }
+
+  public addSystemMessage(
+    text: string,
+    kind: "system" | "event" = "system",
+    persist = true
+  ): ChatMessage {
     const msg: ChatMessage = {
       id: this.nextId(),
       timestamp: formatTime(),
@@ -112,9 +184,14 @@ export class Room {
       senderNick: kind === "event" ? "***" : "SYS",
       text,
     };
-    this.messages.push(msg);
+    return this.recordMessage(msg, persist);
+  }
+
+  public clearMessages(): void {
+    this.messages = [];
+    this.db?.clearChannelMessages(this.channelName);
+    this.callbacks?.onMessageClear?.();
     this.notify();
-    return msg;
   }
 
   public isPresent(personaId: string): boolean {
@@ -123,11 +200,20 @@ export class Room {
     );
   }
 
+  private syncBotsToDb(): void {
+    this.db?.setChannelBotIds(
+      this.channelName,
+      this.activePersonas.map((p) => p.id)
+    );
+    this.callbacks?.onPresenceChange?.();
+  }
+
   public join(persona: Persona): boolean {
     if (this.isPresent(persona.id)) {
       return false;
     }
     this.activePersonas.push(persona);
+    this.syncBotsToDb();
     this.addSystemMessage(
       `${persona.avatar} ${persona.nick} (${persona.displayName} • ${persona.family}, ${persona.era}) has joined ${this.channelName}\n    └─ "${persona.joinLine}"`,
       "event"
@@ -139,6 +225,7 @@ export class Room {
     if (query.trim().toLowerCase() === "all") {
       const removed = [...this.activePersonas];
       this.activePersonas = [];
+      this.syncBotsToDb();
       for (const p of removed) {
         this.addSystemMessage(
           `${p.avatar} ${p.nick} was banished from ${this.channelName} ("${p.leaveLine}")`,
@@ -162,6 +249,7 @@ export class Room {
     }
 
     this.activePersonas = this.activePersonas.filter((p) => p.id !== target.id);
+    this.syncBotsToDb();
     this.addSystemMessage(
       `${target.avatar} ${target.nick} was banished from ${this.channelName} ("${target.leaveLine}")`,
       "event"
@@ -179,6 +267,8 @@ export class Room {
       this.vibeKey = "custom";
       this.vibe = trimmed;
     }
+    this.db?.upsertChannel(this.channelName, this.vibeKey, this.vibe);
+    this.callbacks?.onPresenceChange?.();
     this.addSystemMessage(
       `Channel vibe set to [${this.vibeKey.toUpperCase()}]: ${this.vibe}`,
       "event"
@@ -195,8 +285,7 @@ export class Room {
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
-      this.statusText = "";
-      this.notify();
+      this.setStatus("");
       return true;
     }
     return false;
@@ -214,30 +303,38 @@ export class Room {
       )
       .join("\n");
 
+    const humanRoster =
+      this.humans.length > 0
+        ? this.humans
+            .map((h) => `<@${h.nick}>${h.isHost ? " (Room Host)" : ""}`)
+            .join(", ")
+        : "<@User>";
+
     const pendingWhispers = this.whispers.get(speaker.id) ?? [];
     this.whispers.delete(speaker.id);
 
     const whisperSection =
       pendingWhispers.length > 0
-        ? `\nSECRET WHISPER TO YOU FROM THE SUMMONER (act on this subtly or dramatically!): ${pendingWhispers.join(" | ")}`
+        ? `\nSECRET WHISPER TO YOU FROM A HUMAN IN THE ROOM (act on this subtly or dramatically!): ${pendingWhispers.join(" | ")}`
         : "";
 
     const systemInstruction = `${speaker.systemPrompt}
 
 CHATROOM CONTEXT (${this.channelName}):
 - Your IRC Nick is <${speaker.nick}> (${speaker.displayName}, ${speaker.family}, Era: ${speaker.era}).
-- You are inside a live multi-LLM terminal chatroom alongside a human user (<@User>) and other AI models from different eras:
-${otherModels || "(No other models currently in the room)"}
+- Humans currently in ${this.channelName} (up to 4 co-op players): ${humanRoster}
+- Other AI models currently in ${this.channelName}:
+${otherModels || "(No other AI models currently in the room)"}
 - Current Room Vibe / Scenario: ${this.vibe}
 - Stage Direction for your turn: ${directorReason}${whisperSection}
 
 IMPORTANT FORMAT RULES:
 - Do NOT prefix your response with "<${speaker.nick}>:" — jump straight into your message (or optional <thinking>...</thinking> block if that fits your persona).
 - Keep your response punchy, entertaining, and chatroom-sized (typically 1 to 5 sentences, unless your specific quirk requires a short code snippet or stanza).
-- React directly to the other models or <@User> in the transcript!`;
+- Notice which specific human (<@nick>) or AI model (<ModelNick>) spoke, and react directly to them!`;
 
     const recentHistory = this.messages
-      .slice(-14)
+      .slice(-16)
       .map((m) => {
         if (m.kind === "event" || m.kind === "system") {
           return `*** ${m.text.replace(/\n\s+/g, " ")}`;
@@ -255,47 +352,79 @@ Respond now as <${speaker.nick}>:`;
   }
 
   /**
-   * Posts a user message and triggers a multi-model response turn.
+   * Posts a human message (attributed to their specific @nick) and triggers the reactive Director turn.
    */
-  public async postUserMessage(text: string): Promise<void> {
+  public async postUserMessage(
+    text: string,
+    senderNick = "User"
+  ): Promise<void> {
+    const cleanNick = senderNick.replace(/^@/, "");
     const userMsg: ChatMessage = {
       id: this.nextId(),
       timestamp: formatTime(),
       kind: "user",
-      senderId: "user",
-      senderNick: "@User",
+      senderId: `human:${cleanNick}`,
+      senderNick: `@${cleanNick}`,
       color: "#50fa7b",
       text,
     };
-    this.messages.push(userMsg);
-    this.notify();
+    this.recordMessage(userMsg, true);
 
-    await this.runRoomTurn({ maxSpeakers: 2 });
+    await this.runRoomTurn({ maxSpeakers: 2, forceAllSteps: false });
   }
 
   /**
-   * Runs 1 or more rounds of autonomous model-to-model banter in the room.
+   * Runs N autonomous rounds of bot-to-bot banter.
    */
   public async runBanterRounds(rounds = 2): Promise<void> {
-    for (let i = 0; i < rounds; i++) {
-      const keepGoing = await this.runRoomTurn({ maxSpeakers: 2 });
-      if (!keepGoing) break;
-    }
+    await this.runRoomTurn({
+      maxSpeakers: Math.max(1, Math.min(6, rounds)),
+      forceAllSteps: true,
+    });
   }
 
-  public async runRoomTurn(options?: { maxSpeakers?: number }): Promise<boolean> {
+  public bindPersona(
+    personaId: string,
+    binding: PersonaEngineBinding | null
+  ): void {
+    this.gemini.bindPersona(personaId, binding);
+    this.db?.setPersonaBinding(personaId, binding);
+    this.callbacks?.onPresenceChange?.();
+    this.notify();
+  }
+
+  /**
+   * Reactive turn loop:
+   * - Step 0 picks the initial speaker.
+   * - After Speaker k finishes streaming, the Director reads what Speaker k ACTUALLY said
+   *   and decides if another bot in the room jumps in!
+   */
+  public async runRoomTurn(options?: {
+    maxSpeakers?: number;
+    forceAllSteps?: boolean;
+  }): Promise<boolean> {
     if (this.activePersonas.length === 0) {
       this.addSystemMessage(
         "No models are in the room! Use /summon <model> (e.g. /summon sydney opus-5.5 eliza) to summon someone.",
-        "system"
+        "system",
+        false
       );
       return false;
     }
 
     if (!this.gemini.isConfigured()) {
+      await this.gemini.autoDetectLocalProviders();
+    }
+
+    const anyConfigured =
+      this.gemini.isConfigured() ||
+      this.activePersonas.some((p) => this.gemini.isConfigured(p));
+
+    if (!anyConfigured && this.gemini.activeProvider !== "heylook") {
       this.addSystemMessage(
-        "⚠️ GEMINI_API_KEY (or GOOGLE_API_KEY) is not set. Export it in your shell or add it to .env to enable live LLM simulation.",
-        "system"
+        `⚠️ Provider "${this.gemini.activeProvider}" is not configured. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or run "/provider heylook" to use your local heylookitsanllm server.`,
+        "system",
+        false
       );
       return false;
     }
@@ -304,34 +433,50 @@ Respond now as <${speaker.nick}>:`;
     const controller = new AbortController();
     this.abortController = controller;
 
+    const maxSteps = options?.maxSpeakers ?? 2;
+    const forceAllSteps = options?.forceAllSteps ?? false;
+    let lastSpeakerId: string | undefined;
+
     try {
-      this.statusText = "⚡ Room Director (gemini-3.5-flash-lite) is routing turn...";
-      this.notify();
-
-      const plan = await this.director.planTurn({
-        activePersonas: this.activePersonas,
-        recentMessages: this.messages,
-        vibe: this.vibe,
-        maxSpeakers: options?.maxSpeakers ?? 2,
-        gemini: this.gemini,
-        signal: controller.signal,
-      });
-
-      for (let idx = 0; idx < plan.speakers.length; idx++) {
+      for (let step = 0; step < maxSteps; step++) {
         if (controller.signal.aborted) return false;
-        const item = plan.speakers[idx]!;
-        const speaker = this.activePersonas.find((p) => p.id === item.personaId);
-        if (!speaker) continue;
 
-        const queued = plan.speakers
-          .slice(idx + 1)
-          .map((s) => this.activePersonas.find((p) => p.id === s.personaId)?.nick)
-          .filter(Boolean);
+        this.setStatus(
+          step === 0
+            ? `⚡ Room Director (${this.gemini.activeProvider}) is selecting speaker...`
+            : "⚡ Room Director is checking if another model reacts..."
+        );
 
-        const queueSuffix =
-          queued.length > 0 ? ` (next: ${queued.join(", ")})` : "";
-        this.statusText = `${speaker.avatar} ${speaker.nick} is typing...${queueSuffix}`;
-        this.notify();
+        const decision = await this.director.pickNextSpeaker({
+          activePersonas: this.activePersonas,
+          humans: this.humans,
+          recentMessages: this.messages,
+          vibe: this.vibe,
+          stepIndex: step,
+          lastSpeakerId,
+          forceContinue: forceAllSteps,
+          gemini: this.gemini,
+          signal: controller.signal,
+        });
+
+        if (!decision.shouldContinue || !decision.personaId) {
+          break;
+        }
+
+        const speaker = this.activePersonas.find(
+          (p) => p.id === decision.personaId
+        );
+        if (!speaker) break;
+
+        lastSpeakerId = speaker.id;
+        const resolved = this.gemini.resolveTarget({ persona: speaker });
+        const engineVia = resolved.isCustomBound
+          ? ` • via ${resolved.provider.id}:${resolved.model}`
+          : "";
+
+        this.setStatus(
+          `${speaker.avatar} <${speaker.nick}> is typing (${resolved.provider.id}:${resolved.model})...`
+        );
 
         const msg: ChatMessage = {
           id: this.nextId(),
@@ -341,28 +486,32 @@ Respond now as <${speaker.nick}>:`;
           senderNick: speaker.nick,
           avatar: speaker.avatar,
           color: speaker.color,
-          familyTag: `${speaker.family} • ${speaker.era}`,
+          familyTag: `${speaker.family} • ${speaker.era}${engineVia}`,
           text: "",
           streaming: true,
         };
-        this.messages.push(msg);
-        this.notify();
+        this.recordMessage(msg, false);
 
         const { systemInstruction, prompt } = this.buildPersonaPrompt(
           speaker,
-          item.reason
+          decision.reason ?? "Respond in character."
         );
 
         let rawAccumulated = "";
         await this.gemini.streamText({
+          persona: speaker,
           prompt,
           systemInstruction,
           signal: controller.signal,
+          onStatus: (status) => {
+            this.setStatus(`${speaker.avatar} <${speaker.nick}>: ${status}`);
+          },
           onDelta: (chunk) => {
             rawAccumulated += chunk;
             const parsed = extractThinkingAndBody(rawAccumulated);
             msg.thinking = parsed.thinking;
             msg.text = parsed.body;
+            this.callbacks?.onMessageUpsert?.(msg);
             this.notify();
           },
         });
@@ -373,20 +522,19 @@ Respond now as <${speaker.nick}>:`;
         msg.text =
           finalParsed.body.trim() ||
           (rawAccumulated.trim() ? rawAccumulated.trim() : "...");
-        this.notify();
+        this.recordMessage(msg, true);
       }
       return true;
     } catch (err) {
       if (!controller.signal.aborted) {
         const message = err instanceof Error ? err.message : String(err);
-        this.addSystemMessage(`⚠️ Simulation error: ${message}`, "system");
+        this.addSystemMessage(`⚠️ Simulation error: ${message}`, "system", false);
       }
       return false;
     } finally {
       if (this.abortController === controller) {
         this.abortController = null;
-        this.statusText = "";
-        this.notify();
+        this.setStatus("");
       }
     }
   }
