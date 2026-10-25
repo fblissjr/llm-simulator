@@ -14,6 +14,7 @@
 
 ## Architecture & Module Map
 
+- `docs/PROVIDERS.md` — Comprehensive setup guide for `gemini`, `openrouter`, `heylookitsanllm`, and per-persona `/bind` configurations.
 - `src/index.ts` — CLI entrypoint (`host`, `server`, and `connect` modes).
 - `src/types.ts` — Shared domain types (`Persona`, `ChatMessage`, `ProviderId`, `PersonaEngineBinding`, `ChannelSnapshot`, `ClientPacket`, `ServerPacket`).
 - `src/engine/` — Multi-Provider Inference Layer:

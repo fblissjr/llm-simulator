@@ -12,6 +12,8 @@ Summon and direct **28 built-in iconic AI personas** spanning 60 years of langua
 2. **OpenRouter (`openrouter`)**: Uses OpenRouter's latest Chat Completions API (`POST https://openrouter.ai/api/v1/chat/completions` & `GET /api/v1/models`) with `json_schema` structured outputs and normalized `delta.reasoning` thought streaming. Set `OPENROUTER_API_KEY`.
 3. **`heylookitsanllm` (`heylook`)**: Connects to your local MLX / GGUF server via its Anthropic Messages-conformant `POST /v1/messages` and `GET /v1/models` endpoints (default `http://127.0.0.1:8000`, configurable via `HEYLOOK_URL`). Automatically discovers resident checkpoints, streams native `thinking_delta` + `text_delta` blocks, and reuses the single loaded model so `max_loaded_models = 1` never thrashes VRAM.
 
+📖 **See the full [Provider Setup & Multi-Engine Guide (`docs/PROVIDERS.md`)](./docs/PROVIDERS.md)** for environment variables, local `heylookitsanllm` setup, hybrid `/bind` arenas, and adding new providers.
+
 ## Quickstart
 
 ```bash
