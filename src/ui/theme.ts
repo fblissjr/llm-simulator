@@ -120,11 +120,26 @@ function styleInlineMarkdown(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, (_m, bold) => chalk.bold(bold));
 }
 
+function formatMessageFooter(msg: ChatMessage): string {
+  const rx = msg.reactions
+    ? Object.entries(msg.reactions)
+        .filter(([, users]) => users.length > 0)
+        .map(
+          ([emoji, users]) =>
+            `${emoji} ${chalk.hex("#f1fa8c")(String(users.length))} ${chalk.dim(`(${users.map((u) => (u.startsWith("@") ? u : `@${u}`)).join(", ")})`)}`
+        )
+    : [];
+  if (rx.length === 0) return "";
+  return `\n    ${rx.join("   ")}`;
+}
+
 export function formatChatMessage(
   msg: ChatMessage,
   opts?: { thinkingDisplay?: ThinkingDisplayMode }
 ): string {
   const ts = chalk.hex("#6272a4")(`[${msg.timestamp}]`);
+  const pinBadge = msg.pinned ? ` ${chalk.hex("#ffb86c").bold("[📌 PINNED]")}` : "";
+  const rxFooter = formatMessageFooter(msg);
 
   if (msg.kind === "event") {
     return `${ts} ${chalk.hex("#f1fa8c")("***")} ${chalk.hex("#f8f8f2")(msg.text)}`;
@@ -138,14 +153,14 @@ export function formatChatMessage(
     const nickTag = msg.senderNick.startsWith("@")
       ? msg.senderNick
       : `@${msg.senderNick}`;
-    return `${ts} ${chalk.hex(msg.color || "#ff79c6").italic(`* ${nickTag} ${msg.text}`)}`;
+    return `${ts}${pinBadge} ${chalk.hex(msg.color || "#ff79c6").italic(`* ${nickTag} ${msg.text}`)}${rxFooter}`;
   }
 
   if (msg.kind === "user") {
     const nickTag = msg.senderNick.startsWith("@")
       ? msg.senderNick
       : `@${msg.senderNick}`;
-    return `${ts} ${chalk.hex("#50fa7b").bold(`<${nickTag}>`)} ${chalk.hex("#f8f8f2")(msg.text)}`;
+    return `${ts}${pinBadge} ${chalk.hex("#50fa7b").bold(`<${nickTag}>`)} ${chalk.hex("#f8f8f2")(msg.text)}${rxFooter}`;
   }
 
   const nickColor = chalk.hex(msg.color || "#8be9fd").bold;
@@ -156,7 +171,7 @@ export function formatChatMessage(
   const streamingCursor = msg.streaming ? chalk.hex("#50fa7b")(" ▍") : "";
 
   const parts: string[] = [];
-  parts.push(`${ts} ${nickColor(`<${avatar}${msg.senderNick}>`)}${familyMeta}`);
+  parts.push(`${ts} ${nickColor(`<${avatar}${msg.senderNick}>`)}${familyMeta}${pinBadge}`);
 
   const thinkingMode = opts?.thinkingDisplay ?? "expanded";
   if (msg.thinking && thinkingMode !== "hidden") {
@@ -186,5 +201,5 @@ export function formatChatMessage(
     parts.push(`  ${chalk.dim("...")}${streamingCursor}`);
   }
 
-  return parts.join("\n");
+  return `${parts.join("\n")}${rxFooter}`;
 }

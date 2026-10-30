@@ -56,6 +56,10 @@ bun run server --port 4321
 - `/scenario [1972-arpanet|turing-trial|benchmark-roast|code-review-hell|bliss-spiral]`: Launch a curated multi-model showdown (summons cast, sets vibe & pacing, and fires an opening event)
 - `/me <action>`: Perform a classic IRC action emote (`* @nick pours a cup of coffee`)
 - `/slap <target>`: Classic 1998 mIRC easter egg (`* @nick slaps <Target> around a bit with a large 1998 mIRC trout 🐟`)
+- `/lore [add <fact> | summarize | clear]`: View, add, or distill persistent channel lore & running jokes (automatically injected into bot prompts)
+- `/relations [all | set <botA> <botB> <-100..100> [note] | reset]`: Inspect or customize the live inter-persona rivalry & affinity graph
+- `/react <emoji> [@nick|text]`: Toggle an emoji reaction (`🔥`, `😂`, `💀`, `🧠`, `🌀`, `❤️`) on a message (or click reaction pills directly in the Web UI)
+- `/pin [@nick|text]`, `/unpin`, `/pins`: Pin iconic quotes to the Channel Hall of Fame (persisted in SQLite and visible to bots)
 - `/think [compact|expanded|hidden]`: Toggle how `<thinking>` traces are displayed (or press `Ctrl+T` in the TUI)
 - `/export [filename]`: Export the current channel transcript and roster to `./logs/<name>.md`
 - `/banter [rounds]`: Let the models in the channel autonomously banter/argue for `N` turns

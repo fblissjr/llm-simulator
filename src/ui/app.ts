@@ -219,6 +219,9 @@ export class ChatroomApp {
       if (s.config) {
         this.room.config = s.config;
       }
+      if (s.lore) {
+        this.room.lore = s.lore;
+      }
       this.typingUsers = s.typingUsers ?? [];
       this.apiOnline = s.apiOnline;
       this.locked = s.locked;

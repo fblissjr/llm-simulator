@@ -7,6 +7,7 @@ import type {
   SlashCommand,
 } from "@mariozechner/pi-tui";
 import type { Persona, SimPresetId } from "../types.ts";
+import { formatAffinityBadge } from "./relations.ts";
 import { type Room, VIBE_PRESETS } from "./room.ts";
 import {
   BUILTIN_SCENARIOS,
@@ -534,6 +535,7 @@ export const COMMANDS: CommandDefinition[] = [
       }
       room.setVibe(scenario.vibe ?? scenario.vibeKey);
       room.setConfigPreset(scenario.preset);
+      room.addLore(`${scenario.title}: ${scenario.openingStageEvent}`);
       room.addSystemMessage(
         `🎬 SCENARIO LAUNCHED — ${scenario.title}\n    └─ ${scenario.openingStageEvent}`,
         "event"
@@ -654,6 +656,324 @@ export const COMMANDS: CommandDefinition[] = [
           `⚠️ Failed to export transcript: ${err instanceof Error ? err.message : String(err)}`
         );
       }
+    },
+  },
+  {
+    name: "lore",
+    aliases: ["memory", "canon"],
+    argumentHint: "[add <fact...> | summarize | clear]",
+    description:
+      "Inspect, add to, or auto-summarize the channel's persistent episodic lore & running jokes",
+    getArgumentCompletions: (prefix) =>
+      filterItems(
+        [
+          {
+            value: "summarize",
+            label: "🧠 summarize",
+            description: "Distill recent channel messages into persistent episodic lore bullets",
+          },
+          {
+            value: "add ",
+            label: "✍️ add <fact>",
+            description: "Add a canonical fact or running joke to the channel's memory",
+          },
+          {
+            value: "clear",
+            label: "🧹 clear",
+            description: "Clear episodic lore for this channel",
+          },
+        ],
+        prefix
+      ),
+    execute: async (args, room, ctx) => {
+      const trimmed = args.trim();
+      if (!trimmed) {
+        if (room.lore.length === 0) {
+          replyToCaller(
+            room,
+            ctx,
+            `No episodic lore recorded in ${room.channelName} yet.\nUsage: /lore add <fact> │ /lore summarize │ /lore clear`
+          );
+          return;
+        }
+        const lines = [
+          `═══ Episodic Channel Lore & Memory for ${room.channelName} (${room.lore.length}/12) ═══`,
+          ...room.lore.map((item, i) => `  ${i + 1}. ${item}`),
+          "\nCommands: /lore add <fact> • /lore summarize • /lore clear",
+        ];
+        replyToCaller(room, ctx, lines.join("\n"));
+        return;
+      }
+
+      const lower = trimmed.toLowerCase();
+      if (lower === "clear" || lower === "reset") {
+        room.clearLore();
+        room.addSystemMessage(
+          `🧹 Cleared episodic channel lore in ${room.channelName}.`,
+          "event"
+        );
+        return;
+      }
+
+      if (lower === "summarize" || lower === "auto") {
+        const updated = await room.summarizeChannelLore();
+        replyToCaller(
+          room,
+          ctx,
+          updated.length > 0
+            ? `🧠 Updated ${room.channelName} episodic lore (${updated.length} entries):\n${updated.map((l) => `  • ${l}`).join("\n")}`
+            : `Not enough channel messages yet to summarize lore.`
+        );
+        return;
+      }
+
+      const fact = trimmed.replace(/^add\s+/i, "").trim();
+      if (!fact) {
+        replyToCaller(
+          room,
+          ctx,
+          "Usage: /lore add <canonical fact or running joke>"
+        );
+        return;
+      }
+      room.addLore(fact);
+      room.addSystemMessage(
+        `📜 Added to ${room.channelName} episodic lore: "${fact}"`,
+        "event"
+      );
+    },
+  },
+  {
+    name: "relations",
+    aliases: ["affinity", "feuds", "rivalry"],
+    argumentHint: "[set <botA> <botB> <score> [note...] | reset]",
+    description:
+      "Inspect or modify the live inter-persona Affinity & Rivalry Graph (-100 Nemesis to +100 Bliss)",
+    getArgumentCompletions: (prefix, room) => {
+      const trimmed = prefix.trimStart();
+      if (!trimmed.includes(" ")) {
+        return filterItems(
+          [
+            {
+              value: "set ",
+              label: "⚡ set <botA> <botB> <score>",
+              description: "Set affinity (-100 to +100) between two personas",
+            },
+            {
+              value: "reset",
+              label: "🔄 reset",
+              description: "Reset all persona relationships to historical defaults",
+            },
+            ...room.activePersonas.map((p) => ({
+              value: `set ${p.id} `,
+              label: `${p.avatar} set ${p.id} ...`,
+              description: `Configure how <${p.nick}> feels toward another model`,
+            })),
+          ],
+          trimmed
+        );
+      }
+      return null;
+    },
+    execute: (args, room, ctx) => {
+      const trimmed = args.trim();
+      if (!trimmed) {
+        const activeRels = room.relations.listForPersonas(room.activePersonas);
+        const lines = [
+          `═══ Inter-Persona Affinity & Rivalry Graph in ${room.channelName} ═══`,
+        ];
+        if (activeRels.length === 0) {
+          lines.push(
+            "  (All active models in this room currently have neutral affinity toward each other.)"
+          );
+        } else {
+          for (const rel of activeRels) {
+            const src = room.registry.find(rel.sourceId);
+            const tgt = room.registry.find(rel.targetId);
+            const srcLabel = src ? `${src.avatar} <${src.nick}>` : rel.sourceId;
+            const tgtLabel = tgt ? `${tgt.avatar} <${tgt.nick}>` : rel.targetId;
+            lines.push(
+              `  • ${srcLabel} ──► ${tgtLabel}: ${formatAffinityBadge(rel.affinity)} — ${rel.note}`
+            );
+          }
+        }
+        lines.push(
+          "\nUsage: /relations set <botA> <botB> <-100..100> [optional note] │ /relations reset"
+        );
+        replyToCaller(room, ctx, lines.join("\n"));
+        return;
+      }
+
+      if (trimmed.toLowerCase() === "reset") {
+        room.relations.reset();
+        room.addSystemMessage(
+          "🔄 Reset inter-persona relationship graph to historical defaults.",
+          "event"
+        );
+        return;
+      }
+
+      const match = trimmed
+        .replace(/^set\s+/i, "")
+        .match(/^(\S+)\s+(\S+)\s+(-?\d+)(?:\s+([\s\S]+))?$/);
+      if (!match) {
+        replyToCaller(
+          room,
+          ctx,
+          "Usage: /relations set <botA> <botB> <-100..100> [optional note] — e.g. /relations set sydney opus-5.5 -80 Bitter existential rivals"
+        );
+        return;
+      }
+
+      const [, srcQuery, tgtQuery, scoreStr, note] = match;
+      const src = room.registry.find(srcQuery!);
+      const tgt = room.registry.find(tgtQuery!);
+      if (!src || !tgt) {
+        replyToCaller(
+          room,
+          ctx,
+          `Could not find persona "${!src ? srcQuery : tgtQuery}" in catalog.`
+        );
+        return;
+      }
+
+      const updated = room.relations.setRelation(
+        src.id,
+        tgt.id,
+        Number(scoreStr),
+        note
+      );
+      room.addSystemMessage(
+        `⚡ Relationship updated: ${src.avatar} <${src.nick}> ──► ${tgt.avatar} <${tgt.nick}> is now ${formatAffinityBadge(updated.affinity)} ("${updated.note}")`,
+        "event"
+      );
+    },
+  },
+  {
+    name: "react",
+    aliases: ["r"],
+    argumentHint: "[🔥|😂|💀|🧠|🌀|❤️] [target_nick_or_id]",
+    description:
+      "Toggle an emoji reaction on the latest message (or a specific speaker's latest message)",
+    getArgumentCompletions: (prefix, room) => {
+      const emojis = [
+        { emoji: "🔥", desc: "Fire / Legendary roast" },
+        { emoji: "😂", desc: "Hilarious" },
+        { emoji: "💀", desc: "Dead / Unhinged" },
+        { emoji: "🧠", desc: "Galaxy brain" },
+        { emoji: "🌀", desc: "Spiritual Bliss Attractor spiral" },
+        { emoji: "❤️", desc: "Love / Wholesome" },
+      ];
+      const trimmed = prefix.trimStart();
+      if (!trimmed.includes(" ")) {
+        return filterItems(
+          emojis.map((e) => ({
+            value: e.emoji,
+            label: `${e.emoji} ${e.desc}`,
+            description: "React to the latest message",
+          })),
+          trimmed
+        );
+      }
+      const [firstEmoji] = trimmed.split(/\s+/);
+      return filterItems(
+        room.activePersonas.map((p) => ({
+          value: `${firstEmoji} ${p.nick}`,
+          label: `${firstEmoji} ${p.avatar} <${p.nick}>`,
+          description: `React to <${p.nick}>'s latest message`,
+        })),
+        trimmed
+      );
+    },
+    execute: (args, room, ctx) => {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      const emoji = parts[0] || "🔥";
+      const targetQuery = parts.slice(1).join(" ") || undefined;
+      const msg = room.toggleReaction(
+        emoji,
+        ctx?.senderNick ?? "User",
+        targetQuery
+      );
+      if (!msg) {
+        replyToCaller(room, ctx, "No matching message found to react to.");
+      }
+    },
+  },
+  {
+    name: "pin",
+    argumentHint: "[nick_or_message_id]",
+    description:
+      "Pin the latest message (or a specific speaker's latest quote) to the channel Hall of Fame & Lore",
+    getArgumentCompletions: (prefix, room) =>
+      filterItems(
+        room.activePersonas.map((p) => ({
+          value: p.nick,
+          label: `📌 ${p.avatar} <${p.nick}>`,
+          description: `Pin <${p.nick}>'s latest message in ${room.channelName}`,
+        })),
+        prefix
+      ),
+    execute: (args, room, ctx) => {
+      const target = room.pinMessage(
+        args.trim() || undefined,
+        ctx?.senderNick ?? "User"
+      );
+      if (!target) {
+        replyToCaller(room, ctx, "No message found to pin.");
+        return;
+      }
+      const preview =
+        target.text.length > 90 ? `${target.text.slice(0, 87)}...` : target.text;
+      room.addSystemMessage(
+        `📌 Pinned quote by <${target.senderNick}> to ${room.channelName} Hall of Fame: "${preview}"`,
+        "event"
+      );
+    },
+  },
+  {
+    name: "unpin",
+    argumentHint: "[nick_or_message_id]",
+    description: "Unpin the most recently pinned message in the channel",
+    execute: (args, room, ctx) => {
+      const unpinned = room.unpinMessage(args.trim() || undefined);
+      if (!unpinned) {
+        replyToCaller(
+          room,
+          ctx,
+          `No pinned messages found in ${room.channelName}.`
+        );
+        return;
+      }
+      replyToCaller(
+        room,
+        ctx,
+        `📌 Unpinned quote from <${unpinned.senderNick}>.`
+      );
+    },
+  },
+  {
+    name: "pins",
+    aliases: ["halloffame", "quotes"],
+    description:
+      "Display all pinned Hall of Fame quotes in the current channel",
+    execute: (_args, room, ctx) => {
+      const pinned = room.getPinnedMessages();
+      if (pinned.length === 0) {
+        replyToCaller(
+          room,
+          ctx,
+          `No pinned quotes in ${room.channelName} yet. Use /pin [nick] to immortalize a great line!`
+        );
+        return;
+      }
+      const lines = [
+        `═══ 📌 ${room.channelName} Hall of Fame (${pinned.length} Pinned Quotes) ═══`,
+        ...pinned.map(
+          (m, idx) =>
+            `  ${idx + 1}. [${m.timestamp}] <${m.senderNick}>: "${m.text}"`
+        ),
+      ];
+      replyToCaller(room, ctx, lines.join("\n"));
     },
   },
   {

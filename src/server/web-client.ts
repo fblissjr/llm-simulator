@@ -163,6 +163,39 @@ export function renderWebClientHtml(): string {
       border-radius: 3px;
     }
     .msg .stream-cursor { color: var(--green); }
+    .msg .pin-badge {
+      color: var(--orange);
+      font-weight: 700;
+      font-size: 11px;
+      margin-left: 6px;
+    }
+    .msg-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 4px;
+      padding-left: 10px;
+      align-items: center;
+    }
+    button.react-btn {
+      background: #21222c;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 12px;
+      padding: 1px 6px;
+      font-family: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    button.react-btn:hover {
+      border-color: var(--cyan);
+      color: var(--fg);
+    }
+    button.react-btn.active {
+      border-color: var(--yellow);
+      color: var(--yellow);
+      background: #282a36;
+    }
     .msg.event { color: var(--yellow); }
     .msg.system { color: var(--cyan); }
     footer {
@@ -325,6 +358,17 @@ export function renderWebClientHtml(): string {
           <button type="button" class="quick-btn" data-cmd="/slap sydney">🐟 /slap trout</button>
         </div>
       </details>
+
+      <details class="control-drawer" name="room-drawer">
+        <summary>🧠 Lore, Relations &amp; Pins</summary>
+        <div class="drawer-controls">
+          <button type="button" class="quick-btn" data-cmd="/lore">📜 View /lore</button>
+          <button type="button" class="quick-btn" data-cmd="/lore summarize">✨ /lore summarize</button>
+          <button type="button" class="quick-btn" data-cmd="/relations">🕸️ /relations</button>
+          <button type="button" class="quick-btn" data-cmd="/pins">📌 Hall of Fame (/pins)</button>
+          <button type="button" class="quick-btn" data-cmd="/pin">📌 /pin last msg</button>
+        </div>
+      </details>
     </div>
 
     <div class="quick-bar">
@@ -383,6 +427,25 @@ export function renderWebClientHtml(): string {
         .replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>");
     }
 
+    function renderReactionBar(m) {
+      if (m.streaming || m.kind === "system" || m.kind === "event") return "";
+      const rx = m.reactions || {};
+      const defaults = ["🔥", "😂", "💀", "🧠", "🌀"];
+      const allEmojis = Array.from(new Set(defaults.concat(Object.keys(rx))));
+      const btns = allEmojis.map(emoji => {
+        const users = rx[emoji] || [];
+        const count = users.length;
+        const activeClass = count > 0 ? " active" : "";
+        const title = count > 0 ? " title=\\"" + escapeHtml(users.map(u => String(u).startsWith("@") ? u : "@" + u).join(", ")) + "\\"" : "";
+        const label = count > 0 ? emoji + " " + count : emoji;
+        return '<button type="button" class="react-btn' + activeClass + '" data-msg-id="' + escapeHtml(m.id) + '" data-emoji="' + escapeHtml(emoji) + '"' + title + '>' + label + '</button>';
+      });
+      const pinCmd = m.pinned ? "/unpin " + m.id : "/pin " + m.id;
+      const pinClass = m.pinned ? " active" : "";
+      btns.push('<button type="button" class="react-btn' + pinClass + '" data-pin-cmd="' + escapeHtml(pinCmd) + '" title="Pin or unpin quote">📌</button>');
+      return '<div class="msg-actions">' + btns.join("") + '</div>';
+    }
+
     function renderMessageNode(m) {
       let el = document.getElementById("msg-" + m.id);
       const isNew = !el;
@@ -392,15 +455,17 @@ export function renderWebClientHtml(): string {
         feedEl.appendChild(el);
       }
       el.className = "msg " + m.kind;
+      const pinHtml = m.pinned ? '<span class="pin-badge">[📌 PINNED]</span>' : "";
+      const rxHtml = renderReactionBar(m);
 
       if (m.kind === "event") {
         el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> *** ' + formatInlineMarkdown(m.text);
       } else if (m.kind === "system") {
         el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <strong>[SYS]</strong> ' + formatInlineMarkdown(m.text);
       } else if (m.kind === "emote") {
-        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> * ' + escapeHtml(m.senderNick) + ' ' + formatInlineMarkdown(m.text);
+        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span>' + pinHtml + ' * ' + escapeHtml(m.senderNick) + ' ' + formatInlineMarkdown(m.text) + rxHtml;
       } else if (m.kind === "user") {
-        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(m.senderNick) + '&gt;</span> ' + formatInlineMarkdown(m.text);
+        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(m.senderNick) + '&gt;</span>' + pinHtml + ' ' + formatInlineMarkdown(m.text) + rxHtml;
       } else {
         const col = m.color || "#8be9fd";
         el.style.setProperty("--persona-color", col);
@@ -413,9 +478,10 @@ export function renderWebClientHtml(): string {
           : "";
         const cursor = m.streaming ? ' <span class="stream-cursor">▍</span>' : "";
         el.innerHTML =
-          '<div><span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(av + m.senderNick) + '&gt;</span>' + fam + '</div>' +
+          '<div><span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(av + m.senderNick) + '&gt;</span>' + fam + pinHtml + '</div>' +
           thinkHtml +
-          '<div class="body">' + formatInlineMarkdown(m.text || (m.streaming ? "..." : "")) + cursor + '</div>';
+          '<div class="body">' + formatInlineMarkdown(m.text || (m.streaming ? "..." : "")) + cursor + '</div>' +
+          rxHtml;
       }
       if (isNew || m.streaming) {
         feedEl.scrollTop = feedEl.scrollHeight;
@@ -458,6 +524,25 @@ export function renderWebClientHtml(): string {
       const cur = inputEl.value;
       inputEl.value = cur ? cur.replace(/\\s*$/, " ") + mention + " " : mention + " ";
       inputEl.focus();
+    });
+
+    feedEl.addEventListener("click", (ev) => {
+      const reactBtn = ev.target.closest("button[data-msg-id][data-emoji]");
+      if (reactBtn && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "react",
+          messageId: reactBtn.getAttribute("data-msg-id"),
+          emoji: reactBtn.getAttribute("data-emoji")
+        }));
+        return;
+      }
+      const pinBtn = ev.target.closest("button[data-pin-cmd]");
+      if (pinBtn && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "command",
+          raw: pinBtn.getAttribute("data-pin-cmd")
+        }));
+      }
     });
 
     inputEl.addEventListener("input", () => {

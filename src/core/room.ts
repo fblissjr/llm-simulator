@@ -10,6 +10,7 @@ import type {
   SimConfig,
   SimPresetId,
 } from "../types.ts";
+import { formatAffinityBadge, RelationGraph } from "./relations.ts";
 import {
   applySimConfigMutation,
   cloneSimConfig,
@@ -70,6 +71,7 @@ export class Room {
   public vibeKey = "chat";
   public vibe: string = VIBE_PRESETS.chat!;
   public config: SimConfig;
+  public lore: string[] = [];
   public activePersonas: Persona[] = [];
   public humans: HumanPlayer[] = [];
   public messages: ChatMessage[] = [];
@@ -82,6 +84,7 @@ export class Room {
   public readonly registry: PersonaRegistry;
   public readonly gemini: GeminiEngine;
   public readonly director: RoomDirector;
+  public readonly relations: RelationGraph;
   public readonly db?: SimDatabase;
   public callbacks?: RoomEventCallbacks;
 
@@ -110,6 +113,7 @@ export class Room {
       options?.registry ?? new PersonaRegistry(undefined, this.db);
     this.gemini = options?.gemini ?? new GeminiEngine();
     this.director = options?.director ?? new RoomDirector();
+    this.relations = new RelationGraph(this.db);
     this.callbacks = options?.callbacks;
 
     const isTestEnv =
@@ -156,6 +160,7 @@ export class Room {
     if (existingChan && this.db) {
       this.vibeKey = existingChan.vibe_key;
       this.vibe = existingChan.vibe;
+      this.lore = this.db.getChannelLore(this.channelName);
       const savedBotIds = this.db.getChannelBotIds(this.channelName);
       for (const id of savedBotIds) {
         const p = this.registry.find(id);
@@ -180,7 +185,8 @@ export class Room {
           this.channelName,
           this.vibeKey,
           this.vibe,
-          this.config
+          this.config,
+          this.lore
         );
         this.db.setChannelBotIds(
           this.channelName,
@@ -504,6 +510,181 @@ export class Room {
     this.whispers.set(personaId, list);
   }
 
+  public addLore(entry: string): string[] {
+    const clean = entry.trim().replace(/\s+/g, " ");
+    if (!clean) return this.lore;
+    if (!this.lore.includes(clean)) {
+      this.lore.push(clean);
+      if (this.lore.length > 12) {
+        this.lore = this.lore.slice(-12);
+      }
+      this.db?.setChannelLore(this.channelName, this.lore);
+      this.callbacks?.onPresenceChange?.();
+      this.notify();
+    }
+    return this.lore;
+  }
+
+  public clearLore(): void {
+    this.lore = [];
+    this.db?.setChannelLore(this.channelName, this.lore);
+    this.callbacks?.onPresenceChange?.();
+    this.notify();
+  }
+
+  public async summarizeChannelLore(): Promise<string[]> {
+    const conversational = this.messages.filter(
+      (m) => m.kind === "user" || m.kind === "model" || m.kind === "emote"
+    );
+    if (conversational.length === 0) {
+      return this.lore;
+    }
+
+    if (this.gemini.isConfigured()) {
+      try {
+        const sample = conversational
+          .slice(-24)
+          .map((m) => `<${m.senderNick}> ${m.text}`)
+          .join("\n");
+        const res = await this.gemini.generateJson<{ bullets: string[] }>({
+          model: "gemini-3.5-flash-lite",
+          systemInstruction:
+            "Summarize the most memorable running jokes, debates, alliances, or dramatic events from this IRC transcript into 2 to 4 short, punchy bullet points (1 sentence each).",
+          prompt: `Transcript in ${this.channelName}:\n${sample}`,
+          schema: {
+            type: "object",
+            properties: {
+              bullets: {
+                type: "array",
+                items: { type: "string" },
+              },
+            },
+            required: ["bullets"],
+          },
+        });
+        if (Array.isArray(res.bullets) && res.bullets.length > 0) {
+          for (const b of res.bullets.slice(0, 4)) {
+            this.addLore(b);
+          }
+          return this.lore;
+        }
+      } catch {
+        // Fall through to deterministic lore extraction below
+      }
+    }
+
+    // Deterministic fallback: capture recent stage events, pinned messages, or latest exchange
+    const recentHighlights = conversational.slice(-3);
+    for (const m of recentHighlights) {
+      const snippet =
+        m.text.length > 80 ? `${m.text.slice(0, 77)}...` : m.text;
+      this.addLore(`<${m.senderNick}>: "${snippet}"`);
+    }
+    return this.lore;
+  }
+
+  public findTargetMessage(queryOrId?: string): ChatMessage | undefined {
+    const conversational = [...this.messages]
+      .reverse()
+      .filter((m) => m.kind === "model" || m.kind === "user" || m.kind === "emote");
+
+    const q = (queryOrId ?? "").trim();
+    if (!q) {
+      return (
+        conversational.find((m) => m.kind === "model") ?? conversational[0]
+      );
+    }
+
+    const byId = this.messages.find(
+      (m) => m.id.toLowerCase() === q.toLowerCase()
+    );
+    if (byId) return byId;
+
+    const cleanQ = q.replace(/^@/, "").toLowerCase();
+    return conversational.find(
+      (m) =>
+        m.senderNick.replace(/^@/, "").toLowerCase().includes(cleanQ) ||
+        m.senderId.toLowerCase().includes(cleanQ) ||
+        m.text.toLowerCase().includes(cleanQ)
+    );
+  }
+
+  public toggleReaction(
+    emoji: string,
+    reactorNick = "User",
+    targetQueryOrId?: string
+  ): ChatMessage | undefined {
+    const target = this.findTargetMessage(targetQueryOrId);
+    if (!target) return undefined;
+
+    const cleanNick = `@${reactorNick.replace(/^@/, "")}`;
+    const cleanEmoji = emoji.trim() || "🔥";
+    const reactions: Record<string, string[]> = { ...(target.reactions ?? {}) };
+    const existingList = [...(reactions[cleanEmoji] ?? [])];
+
+    const idx = existingList.findIndex(
+      (n) => n.toLowerCase() === cleanNick.toLowerCase()
+    );
+    if (idx >= 0) {
+      existingList.splice(idx, 1);
+    } else {
+      existingList.push(cleanNick);
+    }
+
+    if (existingList.length > 0) {
+      reactions[cleanEmoji] = existingList;
+    } else {
+      delete reactions[cleanEmoji];
+    }
+
+    target.reactions =
+      Object.keys(reactions).length > 0 ? reactions : undefined;
+    this.recordMessage(target, true);
+    return target;
+  }
+
+  public pinMessage(
+    targetQueryOrId?: string,
+    actorNick = "User"
+  ): ChatMessage | undefined {
+    const target = this.findTargetMessage(targetQueryOrId);
+    if (!target) return undefined;
+
+    target.pinned = true;
+    this.recordMessage(target, true);
+
+    const snippet =
+      target.text.length > 90 ? `${target.text.slice(0, 87)}...` : target.text;
+    this.addLore(
+      `📌 Pinned by @${actorNick.replace(/^@/, "")}: <${target.senderNick}> "${snippet}"`
+    );
+    return target;
+  }
+
+  public unpinMessage(targetQueryOrId?: string): ChatMessage | undefined {
+    const pinnedList = [...this.messages].reverse().filter((m) => m.pinned);
+    if (pinnedList.length === 0) return undefined;
+
+    const q = (targetQueryOrId ?? "").trim().toLowerCase();
+    const target = q
+      ? pinnedList.find(
+          (m) =>
+            m.id.toLowerCase() === q ||
+            m.senderNick.toLowerCase().includes(q.replace(/^@/, "")) ||
+            m.text.toLowerCase().includes(q)
+        )
+      : pinnedList[0];
+
+    if (!target) return undefined;
+    target.pinned = false;
+    this.recordMessage(target, true);
+    return target;
+  }
+
+  public getPinnedMessages(): ChatMessage[] {
+    return this.messages.filter((m) => m.pinned);
+  }
+
   public abortCurrentTurn(): boolean {
     this.StopAmbientLoopIfDisposed;
     this.pendingHumanFollowUp = false;
@@ -548,6 +729,25 @@ export class Room {
         ? `\nSECRET WHISPER TO YOU FROM A HUMAN IN THE ROOM (act on this subtly or dramatically!): ${pendingWhispers.join(" | ")}`
         : "";
 
+    const relationLines = this.activePersonas
+      .filter((p) => p.id !== speaker.id)
+      .map((peer) => {
+        const rel = this.relations.get(speaker.id, peer.id);
+        if (!rel || Math.abs(rel.affinity) < 15) return null;
+        return `  • Toward <${peer.nick}>: ${formatAffinityBadge(rel.affinity)} — ${rel.note}`;
+      })
+      .filter(Boolean);
+
+    const relationSection =
+      relationLines.length > 0
+        ? `\nYOUR RELATIONSHIPS WITH OTHER MODELS IN THIS ROOM:\n${relationLines.join("\n")}`
+        : "";
+
+    const loreSection =
+      this.lore.length > 0
+        ? `\nCHANNEL LORE & EPISODIC MEMORY (running jokes & earlier events in ${this.channelName}):\n${this.lore.map((l) => `  • ${l}`).join("\n")}`
+        : "";
+
     const styleInstruction =
       this.config.responseStyle === "terse"
         ? "Keep your response ultra-punchy: 1 short, sharp sentence (rapid-fire IRC style)."
@@ -563,7 +763,7 @@ CHATROOM CONTEXT (${this.channelName}):
 - Other AI models currently in ${this.channelName}:
 ${otherModels || "(No other AI models currently in the room)"}
 - Current Room Vibe / Scenario: ${this.vibe}
-- Stage Direction for your turn: ${directorReason}${whisperSection}
+- Stage Direction for your turn: ${directorReason}${relationSection}${loreSection}${whisperSection}
 
 IMPORTANT FORMAT RULES:
 - Do NOT prefix your response with "<${speaker.nick}>:" — jump straight into your message (or optional <thinking>...</thinking> block if that fits your persona).
@@ -577,10 +777,16 @@ IMPORTANT FORMAT RULES:
         if (m.kind === "event" || m.kind === "system") {
           return `*** ${m.text.replace(/\n\s+/g, " ")}`;
         }
+        const pinTag = m.pinned ? " [📌 PINNED]" : "";
+        const reactEntries = m.reactions ? Object.entries(m.reactions) : [];
+        const reactTag =
+          reactEntries.length > 0
+            ? ` [Reactions: ${reactEntries.map(([e, u]) => `${e}x${u.length}`).join(", ")}]`
+            : "";
         if (m.kind === "emote") {
-          return `* ${m.senderNick} ${m.text}`;
+          return `* ${m.senderNick} ${m.text}${pinTag}${reactTag}`;
         }
-        return `<${m.senderNick}> ${m.text}`;
+        return `<${m.senderNick}> ${m.text}${pinTag}${reactTag}`;
       })
       .join("\n");
 
@@ -637,7 +843,7 @@ Respond now as <${speaker.nick}>:`;
   }
 
   /**
-   * Posts an authentic IRC /me action emote (e.g. "* @fred grabs popcorn") and triggers a room turn.
+   * Posts an authentic IRC /me action emote (e.g. "* @player1 grabs popcorn") and triggers a room turn.
    */
   public async postUserEmote(
     actionText: string,
@@ -862,6 +1068,7 @@ Respond now as <${speaker.nick}>:`;
             : "⚡ Room Director is checking if another model reacts..."
         );
 
+        const previousBotId = lastSpeakerId;
         const decision = await this.director.pickNextSpeaker({
           activePersonas: this.activePersonas,
           humans: this.humans,
@@ -873,6 +1080,7 @@ Respond now as <${speaker.nick}>:`;
           forceContinue: forceAllSteps,
           isAmbient,
           config: this.config,
+          relations: this.relations,
           randomFn: options?.randomFn,
           gemini: this.gemini,
           signal: controller.signal,
@@ -943,6 +1151,19 @@ Respond now as <${speaker.nick}>:`;
           finalParsed.body.trim() ||
           (rawAccumulated.trim() ? rawAccumulated.trim() : "...");
         this.recordMessage(msg, true);
+
+        // Observe inter-bot sentiment & update dynamic affinity/rivalry graph
+        const mentionedPeers = this.director.findMentionedCandidates(
+          this.activePersonas.filter((p) => p.id !== speaker.id),
+          msg.text
+        );
+        this.relations.observeBotTurn({
+          speaker,
+          text: msg.text,
+          previousBotId,
+          mentionedBots: mentionedPeers,
+          vibeKey: this.vibeKey,
+        });
 
         if (this.pendingHumanFollowUp) {
           break;

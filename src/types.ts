@@ -10,6 +10,13 @@ export interface PersonaEngineBinding {
   model: string;
 }
 
+export interface PersonaRelation {
+  sourceId: string;
+  targetId: string;
+  affinity: number; // -100 (Arch-Rivals) to +100 (Bliss / Kindred)
+  note: string;
+}
+
 export type SimPresetId = "manual" | "chill" | "lively" | "banter" | "chaos" | "custom";
 
 export type DirectorMode = "hybrid" | "llm" | "heuristic";
@@ -84,6 +91,8 @@ export interface ChatMessage {
   thinking?: string;
   text: string;
   streaming?: boolean;
+  reactions?: Record<string, string[]>;
+  pinned?: boolean;
 }
 
 export interface TurnPlan {
@@ -120,6 +129,7 @@ export interface ChannelSnapshot {
   activePersonas: Persona[];
   personaBindings?: Record<string, PersonaEngineBinding>;
   config: SimConfig;
+  lore?: string[];
   typingUsers?: string[];
   messages: ChatMessage[];
   statusText: string;
@@ -139,7 +149,8 @@ export type ClientPacket =
   | { type: "hello"; nick: string; channel?: string }
   | { type: "chat"; text: string }
   | { type: "command"; raw: string }
-  | { type: "typing"; isTyping: boolean };
+  | { type: "typing"; isTyping: boolean }
+  | { type: "react"; messageId: string; emoji: string };
 
 // Server -> Client WebSocket frames
 export type ServerPacket =

@@ -1,3 +1,4 @@
+import type { RelationGraph } from "../core/relations.ts";
 import { LIVELY_DEFAULT_CONFIG } from "../core/sim-config.ts";
 import type {
   ChatMessage,
@@ -36,6 +37,8 @@ export interface CandidateScore {
   weight: number;
   mentioned: boolean;
   recentTurnsAgo: number | null;
+  relationAffinity?: number;
+  relationNote?: string;
 }
 
 export class RoomDirector {
@@ -88,7 +91,11 @@ export class RoomDirector {
     candidates: Persona[],
     recentMessages: ChatMessage[],
     mentionedIds: Set<string>,
-    config: SimConfig
+    config: SimConfig,
+    options?: {
+      lastSpeakerId?: string;
+      relations?: RelationGraph;
+    }
   ): CandidateScore[] {
     const recentModelSenders = recentMessages
       .filter((m) => m.kind === "model")
@@ -125,11 +132,28 @@ export class RoomDirector {
       const mentioned = mentionedIds.has(persona.id);
       const mentionMultiplier = mentioned ? 3.0 : 1.0;
 
+      let relationMultiplier = 1.0;
+      let relationAffinity: number | undefined;
+      let relationNote: string | undefined;
+      if (options?.lastSpeakerId && options?.relations) {
+        const rel = options.relations.get(persona.id, options.lastSpeakerId);
+        if (rel && Math.abs(rel.affinity) >= 25) {
+          relationAffinity = rel.affinity;
+          relationNote = rel.note;
+          relationMultiplier = 1.0 + Math.abs(rel.affinity) / 140;
+        }
+      }
+
       return {
         persona,
-        weight: Math.max(0.05, baseWeight * recencyMultiplier * mentionMultiplier),
+        weight: Math.max(
+          0.05,
+          baseWeight * recencyMultiplier * mentionMultiplier * relationMultiplier
+        ),
         mentioned,
         recentTurnsAgo,
+        relationAffinity,
+        relationNote,
       };
     });
   }
@@ -211,6 +235,7 @@ export class RoomDirector {
     forceContinue?: boolean;
     isAmbient?: boolean;
     config?: SimConfig;
+    relations?: RelationGraph;
     randomFn?: () => number;
     gemini: GeminiEngine;
     signal?: AbortSignal;
@@ -226,6 +251,7 @@ export class RoomDirector {
       forceContinue = false,
       isAmbient = false,
       config = LIVELY_DEFAULT_CONFIG,
+      relations,
       randomFn = Math.random,
       gemini,
       signal,
@@ -282,7 +308,8 @@ export class RoomDirector {
       candidates,
       recentMessages,
       mentionedIds,
-      config
+      config,
+      { lastSpeakerId, relations }
     );
 
     const mustContinue =
@@ -355,13 +382,25 @@ export class RoomDirector {
     }
 
     const rosterSummary = scored
-      .map(({ persona: p, weight, recentTurnsAgo }) => {
-        const recencyNote =
-          recentTurnsAgo !== null
-            ? ` [spoke ${recentTurnsAgo} turn(s) ago]`
-            : " [fresh]";
-        return `- id: "${p.id}" | nick: <${p.nick}> (${p.displayName}, ${p.era}, ${p.family}, talkativeness: ${p.talkativeness}, priorityWeight: ${weight.toFixed(2)}${recencyNote}) — ${p.bio}`;
-      })
+      .map(
+        ({
+          persona: p,
+          weight,
+          recentTurnsAgo,
+          relationAffinity,
+          relationNote,
+        }) => {
+          const recencyNote =
+            recentTurnsAgo !== null
+              ? ` [spoke ${recentTurnsAgo} turn(s) ago]`
+              : " [fresh]";
+          const relInfo =
+            relationAffinity !== undefined
+              ? ` [affinity to last speaker: ${relationAffinity >= 0 ? `+${relationAffinity}` : relationAffinity} (${relationNote})]`
+              : "";
+          return `- id: "${p.id}" | nick: <${p.nick}> (${p.displayName}, ${p.era}, ${p.family}, talkativeness: ${p.talkativeness}, priorityWeight: ${weight.toFixed(2)}${recencyNote}${relInfo}) — ${p.bio}`;
+        }
+      )
       .join("\n");
 
     const humanList =

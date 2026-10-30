@@ -286,6 +286,7 @@ export class ChannelHub {
       activePersonas: room.activePersonas,
       personaBindings: this.gemini.getAllPersonaBindings(),
       config: room.config,
+      lore: room.lore,
       typingUsers: room.getTypingHumans(),
       messages: room.messages.slice(-80),
       statusText: room.statusText,
@@ -430,6 +431,13 @@ export class ChannelHub {
 
     if (packet.type === "typing") {
       room.markHumanTyping(ws.data.nick, Boolean(packet.isTyping));
+      return;
+    }
+
+    if (packet.type === "react") {
+      if (packet.messageId && packet.emoji) {
+        room.toggleReaction(packet.emoji, ws.data.nick, packet.messageId);
+      }
       return;
     }
 
