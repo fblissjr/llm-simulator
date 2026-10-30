@@ -8,7 +8,7 @@ Summon and direct **28 built-in iconic AI personas** spanning 60 years of langua
 
 `llm-sim` supports multiple pluggable inference backends with a **Global -> Per-Persona Hierarchy** (every simulated persona retains its authentic era `systemPrompt`, verbal tics, and quirks regardless of which backend powers it):
 
-1. **Google Gemini (`gemini`)**: Uses `@google/genai` Interactions API (`gemini-3.8-flash` & `gemini-3.5-flash-lite`). Set `GEMINI_API_KEY`.
+1. **Google Gemini (`gemini`)**: Uses `@google/genai` Interactions API. Set `GEMINI_API_KEY`.
 2. **OpenRouter (`openrouter`)**: Uses OpenRouter's latest Chat Completions API (`POST https://openrouter.ai/api/v1/chat/completions` & `GET /api/v1/models`) with `json_schema` structured outputs and normalized `delta.reasoning` thought streaming. Set `OPENROUTER_API_KEY`.
 3. **`heylookitsanllm` (`heylook`)**: Connects to your local MLX / GGUF server via its Anthropic Messages-conformant `POST /v1/messages` and `GET /v1/models` endpoints (default `http://127.0.0.1:8000`, configurable via `HEYLOOK_URL`). Automatically discovers resident checkpoints, streams native `thinking_delta` + `text_delta` blocks, and reuses the single loaded model so `max_loaded_models = 1` never thrashes VRAM.
 
@@ -24,7 +24,7 @@ bun run start
 
 # Option B: Run with OpenRouter
 export OPENROUTER_API_KEY="sk-or-v1-..."
-bun run start --provider openrouter --model "anthropic/claude-3.7-sonnet"
+bun run start --provider openrouter --model "thebestmodel/ever"
 
 # Option C: Run 100% locally with heylookitsanllm (on http://127.0.0.1:8000)
 bun run start --provider heylook
