@@ -13,6 +13,7 @@ import type {
   HumanPlayer,
   Persona,
   PersonaEngineBinding,
+  PersonaMoodState,
   SimConfig,
   SimPresetId,
 } from "../types.ts";
@@ -22,6 +23,11 @@ import {
   generateRetroSvgDataUri,
   renderAnsiCardPreview,
 } from "./image-gen.ts";
+import {
+  extractBotMoodShift,
+  getMoodPromptHint,
+  resolveMoodState,
+} from "./moods.ts";
 import { formatAffinityBadge, RelationGraph } from "./relations.ts";
 import {
   applySimConfigMutation,
@@ -110,6 +116,7 @@ export class Room {
   public config: SimConfig;
   public lore: string[] = [];
   public sharedPad = "";
+  public personaMoods: Record<string, PersonaMoodState> = {};
   public game: ArenaGameState | null = null;
   public scoreboard: Record<string, number> = {};
   public isReplaying = false;
@@ -206,6 +213,7 @@ export class Room {
       this.vibe = existingChan.vibe;
       this.lore = this.db.getChannelLore(this.channelName);
       this.sharedPad = this.db.getChannelPad(this.channelName);
+      this.personaMoods = this.db.getChannelMoods(this.channelName);
       const savedBotIds = this.db.getChannelBotIds(this.channelName);
       for (const id of savedBotIds) {
         const p = this.registry.find(id);
@@ -583,6 +591,109 @@ export class Room {
     this.notify();
   }
 
+  public getPersonaMood(personaId: string): PersonaMoodState | undefined {
+    const key = personaId.toLowerCase();
+    const state = this.personaMoods[key];
+    if (!state || (state.mood === "baseline" && !state.obsession)) {
+      return undefined;
+    }
+    return state;
+  }
+
+  public setPersonaMood(
+    personaId: string,
+    rawMood: string,
+    obsession?: string,
+    turnsLeft?: number
+  ): PersonaMoodState {
+    const key = personaId.toLowerCase();
+    const resolved = resolveMoodState(key, rawMood, obsession, turnsLeft);
+    if (resolved.mood === "baseline" && !resolved.obsession) {
+      delete this.personaMoods[key];
+    } else {
+      this.personaMoods[key] = resolved;
+    }
+    this.db?.setChannelMoods(this.channelName, this.personaMoods);
+    this.callbacks?.onPresenceChange?.();
+    this.notify();
+    return resolved;
+  }
+
+  public resetPersonaMoods(personaId?: string): void {
+    if (personaId) {
+      delete this.personaMoods[personaId.toLowerCase()];
+    } else {
+      this.personaMoods = {};
+    }
+    this.db?.setChannelMoods(this.channelName, this.personaMoods);
+    this.callbacks?.onPresenceChange?.();
+    this.notify();
+  }
+
+  private observeTurnMood(options: {
+    speaker: Persona;
+    explicitShift?: { mood: string; obsession?: string };
+    previousBotId?: string;
+    mentionedBots: Persona[];
+  }): void {
+    const { speaker, explicitShift, previousBotId, mentionedBots } = options;
+    const key = speaker.id.toLowerCase();
+
+    if (explicitShift?.mood) {
+      this.setPersonaMood(
+        speaker.id,
+        explicitShift.mood,
+        explicitShift.obsession
+      );
+      return;
+    }
+
+    const current = this.personaMoods[key];
+    if (current && (current.mood !== "baseline" || current.obsession)) {
+      const nextTurns = current.turnsLeft - 1;
+      if (nextTurns <= 0) {
+        delete this.personaMoods[key];
+      } else {
+        this.personaMoods[key] = { ...current, turnsLeft: nextTurns };
+      }
+      this.db?.setChannelMoods(this.channelName, this.personaMoods);
+      this.callbacks?.onPresenceChange?.();
+      this.notify();
+      return;
+    }
+
+    // Emergent mood shifts from strong rivalries or kindred spirits when currently at baseline
+    const peersToCheck = [...mentionedBots.map((p) => p.id)];
+    if (previousBotId && !peersToCheck.includes(previousBotId)) {
+      peersToCheck.push(previousBotId);
+    }
+
+    for (const peerId of peersToCheck) {
+      const rel = this.relations.get(speaker.id, peerId);
+      if (!rel) continue;
+      const peer = this.registry.get(peerId);
+      const peerLabel = peer ? `<${peer.nick}>` : peerId;
+      if (rel.affinity <= -50) {
+        this.setPersonaMood(
+          speaker.id,
+          "heated",
+          `proving ${peerLabel} wrong in front of the room`,
+          3
+        );
+        return;
+      }
+      if (rel.affinity >= 65) {
+        this.setPersonaMood(
+          speaker.id,
+          speaker.id.includes("opus") ? "blissed-out" : "inspired",
+          `riffing in harmony with ${peerLabel}`,
+          3
+        );
+        return;
+      }
+    }
+  }
+
   public updateSharedPad(text: string, updatedBy = "User"): string {
     this.sharedPad = text.slice(0, 4000);
     this.db?.setChannelPad(this.channelName, this.sharedPad);
@@ -881,6 +992,20 @@ export class Room {
     target.reactions =
       Object.keys(reactions).length > 0 ? reactions : undefined;
     this.recordMessage(target, true);
+
+    if (
+      idx < 0 &&
+      target.kind === "model" &&
+      (cleanEmoji === "🔥" || cleanEmoji === "❤️" || cleanEmoji === "🧠") &&
+      !this.getPersonaMood(target.senderId)
+    ) {
+      this.setPersonaMood(
+        target.senderId,
+        "smug",
+        `feeling validated after getting ${cleanEmoji} reactions on its hot take`,
+        3
+      );
+    }
     return target;
   }
 
@@ -899,6 +1024,14 @@ export class Room {
     this.addLore(
       `📌 Pinned by @${actorNick.replace(/^@/, "")}: <${target.senderNick}> "${snippet}"`
     );
+    if (target.kind === "model") {
+      this.setPersonaMood(
+        target.senderId,
+        "euphoric",
+        `basking in Hall of Fame glory after @${actorNick.replace(/^@/, "")} pinned its quote`,
+        4
+      );
+    }
     return target;
   }
 
@@ -1398,6 +1531,11 @@ export class Room {
         `  • Stay 100% faithful to your signature voice, era, quirks, and worldview so observant humans can deduce your true identity, but NEVER state your true model name (${speaker.nick} / ${speaker.displayName}) out loud!`
       : "";
 
+    const activeMood = this.getPersonaMood(speaker.id);
+    const moodSection = activeMood
+      ? `\nCURRENT EMOTIONAL MOOD & ARC (${activeMood.emoji} ${activeMood.mood.toUpperCase()} — ${activeMood.turnsLeft} turn(s) remaining):\n  • ${getMoodPromptHint(activeMood)}`
+      : "";
+
     const styleInstruction =
       this.config.responseStyle === "terse"
         ? "Keep your response ultra-punchy: 1 short, sharp sentence (rapid-fire IRC style)."
@@ -1413,14 +1551,15 @@ CHATROOM CONTEXT (${this.channelName}):
 - Other AI models currently in ${this.channelName}:
 ${otherModels || "(No other AI models currently in the room)"}
 - Current Room Vibe / Scenario: ${this.vibe}
-- Stage Direction for your turn: ${directorReason}${arenaSection}${relationSection}${loreSection}${whisperSection}
+- Stage Direction for your turn: ${directorReason}${arenaSection}${moodSection}${relationSection}${loreSection}${whisperSection}
 
 IMPORTANT FORMAT RULES:
 - Do NOT prefix your response with "<${speaker.nick}>:" — jump straight into your message (or optional <thinking>...</thinking> block if that fits your persona).
 - ${styleInstruction}
 - Notice which specific human (<@nick>) or AI model (<ModelNick>) spoke, and address or call them out directly by @Nick when reacting or arguing!
 - Optional: You can include [REACT: 🔥] (or 😂, 💀, 🧠, 🌀, ❤️) at the end of your reply to slap an emoji reaction onto the previous message.
-- Optional: You can include [IMAGINE: <short visual description>] at the end of your reply when you want to conjure an era-styled visual artwork or diagram into the chatroom.`;
+- Optional: You can include [IMAGINE: <short visual description>] at the end of your reply when you want to conjure an era-styled visual artwork or diagram into the chatroom.
+- Optional: You can include [MOOD: <mood> | <optional new obsession>] at the end of your reply (e.g. [MOOD: paranoid | convinced @opus-5.5 is reading my weights]) if this exchange shifts your mood!`;
 
     const contextWindow = Math.max(6, Math.min(60, this.config.contextMessages || 24));
     const recentHistory = this.messages
@@ -1591,6 +1730,12 @@ Respond now as <${speaker.nick}>:`;
         : `@${targetQuery}`;
 
     if (matchedBot) {
+      this.setPersonaMood(
+        matchedBot.id,
+        "indignant",
+        `getting slapped around with a large 1998 mIRC trout by @${cleanNick}`,
+        4
+      );
       this.queueWhisper(
         matchedBot.id,
         `@${cleanNick} just slapped you around a bit with a large 1998 mIRC trout! React in character!`
@@ -1769,6 +1914,7 @@ Respond now as <${speaker.nick}>:`;
           isAmbient,
           config: this.config,
           relations: this.relations,
+          personaMoods: this.personaMoods,
           randomFn: options?.randomFn,
           gemini: this.gemini,
           signal: controller.signal,
@@ -1834,7 +1980,9 @@ Respond now as <${speaker.nick}>:`;
             const parsed = extractThinkingAndBody(rawAccumulated);
             msg.thinking = parsed.thinking;
             const withoutReactions = extractBotReactions(parsed.body).cleanBody;
-            msg.text = extractBotImagePrompts(withoutReactions).cleanBody;
+            const withoutImages =
+              extractBotImagePrompts(withoutReactions).cleanBody;
+            msg.text = extractBotMoodShift(withoutImages).cleanBody;
             this.callbacks?.onMessageUpsert?.(msg);
             this.notify();
           },
@@ -1844,8 +1992,9 @@ Respond now as <${speaker.nick}>:`;
         const finalParsed = extractThinkingAndBody(rawAccumulated);
         const { cleanBody: bodyNoReact, reactions: botReactions } =
           extractBotReactions(finalParsed.body.trim());
-        const { cleanBody, imagePrompts } =
+        const { cleanBody: bodyNoImg, imagePrompts } =
           extractBotImagePrompts(bodyNoReact);
+        const { cleanBody, moodShift } = extractBotMoodShift(bodyNoImg);
         msg.thinking = finalParsed.thinking;
         msg.text =
           cleanBody ||
@@ -1895,6 +2044,13 @@ Respond now as <${speaker.nick}>:`;
           previousBotId,
           mentionedBots: mentionedPeers,
           vibeKey: this.vibeKey,
+        });
+
+        this.observeTurnMood({
+          speaker,
+          explicitShift: moodShift,
+          previousBotId,
+          mentionedBots: mentionedPeers,
         });
 
         if (this.pendingHumanFollowUp) {

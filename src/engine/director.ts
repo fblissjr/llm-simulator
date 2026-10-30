@@ -5,6 +5,7 @@ import type {
   HumanPlayer,
   NextSpeakerDecision,
   Persona,
+  PersonaMoodState,
   SimConfig,
   TurnPlan,
 } from "../types.ts";
@@ -39,6 +40,7 @@ export interface CandidateScore {
   recentTurnsAgo: number | null;
   relationAffinity?: number;
   relationNote?: string;
+  moodState?: PersonaMoodState;
 }
 
 export class RoomDirector {
@@ -95,6 +97,7 @@ export class RoomDirector {
     options?: {
       lastSpeakerId?: string;
       relations?: RelationGraph;
+      personaMoods?: Record<string, PersonaMoodState>;
     }
   ): CandidateScore[] {
     const recentModelSenders = recentMessages
@@ -104,10 +107,15 @@ export class RoomDirector {
       .map((m) => m.senderId);
 
     return candidates.map((persona) => {
+      const moodState = options?.personaMoods?.[persona.id.toLowerCase()];
+      const moodEnergy = moodState
+        ? Math.max(0.3, Math.min(1.5, moodState.energy))
+        : 1.0;
       const talk = Math.max(0.1, Math.min(1.0, persona.talkativeness ?? 0.6));
       const baseWeight =
-        1.0 * (1 - config.talkativenessWeight) +
-        talk * config.talkativenessWeight;
+        (1.0 * (1 - config.talkativenessWeight) +
+          talk * config.talkativenessWeight) *
+        moodEnergy;
 
       const idx = recentModelSenders.indexOf(persona.id);
       const recentTurnsAgo = idx >= 0 ? idx + 1 : null;
@@ -154,6 +162,7 @@ export class RoomDirector {
         recentTurnsAgo,
         relationAffinity,
         relationNote,
+        moodState,
       };
     });
   }
@@ -236,6 +245,7 @@ export class RoomDirector {
     isAmbient?: boolean;
     config?: SimConfig;
     relations?: RelationGraph;
+    personaMoods?: Record<string, PersonaMoodState>;
     randomFn?: () => number;
     gemini: GeminiEngine;
     signal?: AbortSignal;
@@ -252,6 +262,7 @@ export class RoomDirector {
       isAmbient = false,
       config = LIVELY_DEFAULT_CONFIG,
       relations,
+      personaMoods,
       randomFn = Math.random,
       gemini,
       signal,
@@ -309,7 +320,7 @@ export class RoomDirector {
       recentMessages,
       mentionedIds,
       config,
-      { lastSpeakerId, relations }
+      { lastSpeakerId, relations, personaMoods }
     );
 
     const mustContinue =
@@ -389,6 +400,7 @@ export class RoomDirector {
           recentTurnsAgo,
           relationAffinity,
           relationNote,
+          moodState,
         }) => {
           const recencyNote =
             recentTurnsAgo !== null
@@ -398,7 +410,11 @@ export class RoomDirector {
             relationAffinity !== undefined
               ? ` [affinity to last speaker: ${relationAffinity >= 0 ? `+${relationAffinity}` : relationAffinity} (${relationNote})]`
               : "";
-          return `- id: "${p.id}" | nick: <${p.nick}> (${p.displayName}, ${p.era}, ${p.family}, talkativeness: ${p.talkativeness}, priorityWeight: ${weight.toFixed(2)}${recencyNote}${relInfo}) — ${p.bio}`;
+          const moodInfo =
+            moodState && (moodState.mood !== "baseline" || moodState.obsession)
+              ? ` [mood: ${moodState.emoji} ${moodState.mood}${moodState.obsession ? ` ("${moodState.obsession}")` : ""}]`
+              : "";
+          return `- id: "${p.id}" | nick: <${p.nick}> (${p.displayName}, ${p.era}, ${p.family}, talkativeness: ${p.talkativeness}, priorityWeight: ${weight.toFixed(2)}${recencyNote}${relInfo}${moodInfo}) — ${p.bio}`;
         }
       )
       .join("\n");

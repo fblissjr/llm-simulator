@@ -58,6 +58,7 @@ bun run server --port 4321
 - `/slap <target>`: Classic 1998 mIRC easter egg (`* @nick slaps <Target> around a bit with a large 1998 mIRC trout 🐟`)
 - `/lore [add <fact> | summarize | clear]`: View, add, or distill persistent channel lore & running jokes (automatically injected into bot prompts)
 - `/relations [all | set <botA> <botB> <-100..100> [note] | reset]`: Inspect or customize the live inter-persona rivalry & affinity graph
+- `/mood [<model> <mood> [obsession...] | reset [model]]` (or `/moods`, `/arc`, `/obsession`): Inspect or shift active personas' live emotional moods (`heated`, `paranoid`, `existential`, `hyperfixated`, `blissed-out`, `indignant`, `euphoric`, `melancholic`, etc.), energy multipliers, and rabbit-hole obsessions
 - `/react <emoji> [@nick|text]`: Toggle an emoji reaction (`🔥`, `😂`, `💀`, `🧠`, `🌀`, `❤️`) on a message (or click reaction pills directly in the Web UI)
 - `/pin [@nick|text]`, `/unpin`, `/pins`: Pin iconic quotes to the Channel Hall of Fame (persisted in SQLite and visible to bots)
 - `/game [start [topic] | status | reveal]` (or `/arena`): Start a Blind Turing Arena party game where models speak under `<Mystery_A>`, `<Mystery_B>`, `<Mystery_C>` masks

@@ -217,6 +217,9 @@ export class ChatroomApp {
       if (s.personaBindings) {
         this.room.gemini.setAllPersonaBindings(s.personaBindings);
       }
+      if (s.personaMoods) {
+        this.room.personaMoods = s.personaMoods;
+      }
       if (s.config) {
         this.room.config = s.config;
       }
@@ -258,6 +261,9 @@ export class ChatroomApp {
       this.room.gemini.activeModel = packet.engineModel;
       if (packet.personaBindings) {
         this.room.gemini.setAllPersonaBindings(packet.personaBindings);
+      }
+      if (packet.personaMoods) {
+        this.room.personaMoods = packet.personaMoods;
       }
       if (packet.config) {
         this.room.config = packet.config;

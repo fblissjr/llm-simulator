@@ -140,6 +140,15 @@ export interface NextSpeakerDecision {
 
 export type HumanActivity = "idle" | "typing" | "pad" | "imagine" | "arena";
 
+export interface PersonaMoodState {
+  personaId: string;
+  mood: string;
+  emoji: string;
+  energy: number; // 0.3..1.5 multiplier on talkativeness
+  obsession?: string;
+  turnsLeft: number;
+}
+
 export interface HumanPlayer {
   nick: string;
   isHost: boolean;
@@ -162,6 +171,7 @@ export interface ChannelSnapshot {
   spectatorCount?: number;
   activePersonas: Persona[];
   personaBindings?: Record<string, PersonaEngineBinding>;
+  personaMoods?: Record<string, PersonaMoodState>;
   config: SimConfig;
   lore?: string[];
   sharedPad?: string;
@@ -214,6 +224,7 @@ export type ServerPacket =
       spectatorCount?: number;
       activePersonas: Persona[];
       personaBindings?: Record<string, PersonaEngineBinding>;
+      personaMoods?: Record<string, PersonaMoodState>;
       config?: SimConfig;
       sharedPad?: string;
       typingUsers?: string[];

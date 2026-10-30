@@ -5,6 +5,7 @@ import type {
   ChatMessageImage,
   Persona,
   PersonaEngineBinding,
+  PersonaMoodState,
   PersonaRelation,
   SimConfig,
 } from "../types.ts";
@@ -16,6 +17,7 @@ export interface StoredChannelRow {
   config_json: string | null;
   lore_json: string | null;
   pad_text: string | null;
+  moods_json: string | null;
   updated_at: number;
 }
 
@@ -37,6 +39,7 @@ export class SimDatabase {
         config_json TEXT,
         lore_json TEXT,
         pad_text TEXT,
+        moods_json TEXT,
         updated_at INTEGER NOT NULL
       );
 
@@ -103,6 +106,7 @@ export class SimDatabase {
       "ALTER TABLE channels ADD COLUMN config_json TEXT;",
       "ALTER TABLE channels ADD COLUMN lore_json TEXT;",
       "ALTER TABLE channels ADD COLUMN pad_text TEXT;",
+      "ALTER TABLE channels ADD COLUMN moods_json TEXT;",
       "ALTER TABLE messages ADD COLUMN reactions_json TEXT;",
       "ALTER TABLE messages ADD COLUMN pinned INTEGER DEFAULT 0;",
       "ALTER TABLE messages ADD COLUMN image_json TEXT;",
@@ -117,7 +121,7 @@ export class SimDatabase {
 
   public getChannel(name: string): StoredChannelRow | null {
     const stmt = this.db.query<StoredChannelRow, [string]>(
-      "SELECT name, vibe_key, vibe, config_json, lore_json, pad_text, updated_at FROM channels WHERE name = ?"
+      "SELECT name, vibe_key, vibe, config_json, lore_json, pad_text, moods_json, updated_at FROM channels WHERE name = ?"
     );
     return stmt.get(name) ?? null;
   }
@@ -128,7 +132,8 @@ export class SimDatabase {
     vibe: string,
     config?: SimConfig,
     lore?: string[],
-    padText?: string
+    padText?: string,
+    moods?: Record<string, PersonaMoodState>
   ): void {
     const existing = this.getChannel(name);
     const configJson = config
@@ -139,18 +144,49 @@ export class SimDatabase {
       : (existing?.lore_json ?? null);
     const padVal =
       padText !== undefined ? padText : (existing?.pad_text ?? null);
+    const moodsJson = moods
+      ? JSON.stringify(moods)
+      : (existing?.moods_json ?? null);
     this.db.run(
-      `INSERT INTO channels (name, vibe_key, vibe, config_json, lore_json, pad_text, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO channels (name, vibe_key, vibe, config_json, lore_json, pad_text, moods_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(name) DO UPDATE SET
          vibe_key = excluded.vibe_key,
          vibe = excluded.vibe,
          config_json = COALESCE(excluded.config_json, channels.config_json),
          lore_json = COALESCE(excluded.lore_json, channels.lore_json),
          pad_text = COALESCE(excluded.pad_text, channels.pad_text),
+         moods_json = COALESCE(excluded.moods_json, channels.moods_json),
          updated_at = excluded.updated_at`,
-      [name, vibeKey, vibe, configJson, loreJson, padVal, Date.now()]
+      [name, vibeKey, vibe, configJson, loreJson, padVal, moodsJson, Date.now()]
     );
+  }
+
+  public setChannelMoods(
+    name: string,
+    moods: Record<string, PersonaMoodState>
+  ): void {
+    const existing = this.getChannel(name);
+    this.upsertChannel(
+      name,
+      existing?.vibe_key ?? "chat",
+      existing?.vibe ?? "",
+      undefined,
+      undefined,
+      undefined,
+      moods
+    );
+  }
+
+  public getChannelMoods(name: string): Record<string, PersonaMoodState> {
+    const row = this.getChannel(name);
+    if (!row?.moods_json) return {};
+    try {
+      const parsed = JSON.parse(row.moods_json);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
   }
 
   public setChannelPad(name: string, padText: string): void {

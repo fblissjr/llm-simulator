@@ -412,6 +412,7 @@ export function renderWebClientHtml(): string {
           <button type="button" class="quick-btn" data-cmd="/lore">📜 View /lore</button>
           <button type="button" class="quick-btn" data-cmd="/lore summarize">✨ /lore summarize</button>
           <button type="button" class="quick-btn" data-cmd="/relations">🕸️ /relations</button>
+          <button type="button" class="quick-btn" data-cmd="/mood">🎭 View /mood</button>
           <button type="button" class="quick-btn" data-cmd="/pins">📌 Hall of Fame (/pins)</button>
           <button type="button" class="quick-btn" data-cmd="/pin">📌 /pin last msg</button>
         </div>
@@ -599,6 +600,7 @@ export function renderWebClientHtml(): string {
       countEl.textContent = "4-Player DOOM Co-op [" + state.humans.length + "/" + (state.maxHumans || 4) + "]" + specSuffix;
 
       const bindings = state.personaBindings || {};
+      const moods = state.personaMoods || {};
       if (typeof state.sharedPad === "string" && coopPadEl && document.activeElement !== coopPadEl) {
         coopPadEl.value = state.sharedPad;
       }
@@ -607,10 +609,18 @@ export function renderWebClientHtml(): string {
         return '<button type="button" class="pill human" data-mention="@' + escapeHtml(h.nick) + '">@' + escapeHtml(h.nick) + (h.isHost ? " ★" : "") + actIcon + '</button>';
       });
       const botPills = state.activePersonas.map(p => {
-        const b = bindings[String(p.id).toLowerCase()];
+        const key = String(p.id).toLowerCase();
+        const b = bindings[key];
+        const m = moods[key];
         const viaBadge = b ? '<span class="pill-via">(' + escapeHtml(b.provider + ":" + b.model) + ')</span>' : "";
-        return '<button type="button" class="pill bot" data-mention="@' + escapeHtml(p.nick) + '" style="--persona-color:' + escapeHtml(p.color) + '">' +
-          escapeHtml(p.avatar + " <" + p.nick + ">") + viaBadge + '</button>';
+        const moodBadge = (m && (m.mood !== "baseline" || m.obsession))
+          ? '<span class="pill-via">[' + escapeHtml(m.emoji + " " + m.mood) + ']</span>'
+          : "";
+        const moodTitle = (m && m.obsession)
+          ? ' title="' + escapeHtml(m.emoji + " " + m.mood + " — Obsession: " + m.obsession) + '"'
+          : "";
+        return '<button type="button" class="pill bot" data-mention="@' + escapeHtml(p.nick) + '" style="--persona-color:' + escapeHtml(p.color) + '"' + moodTitle + '>' +
+          escapeHtml(p.avatar + " <" + p.nick + ">") + moodBadge + viaBadge + '</button>';
       });
       rosterEl.innerHTML = humanPills.concat(botPills).join("");
     }
@@ -706,6 +716,7 @@ export function renderWebClientHtml(): string {
           activeProvider: pkt.activeProvider,
           engineModel: pkt.engineModel,
           personaBindings: pkt.personaBindings,
+          personaMoods: pkt.personaMoods,
           config: pkt.config,
           locked: pkt.locked,
           humans: pkt.humans,

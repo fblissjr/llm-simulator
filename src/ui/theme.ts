@@ -103,8 +103,14 @@ export function renderIrcHeader(
       .map((p) => {
         const b = bindings[p.id.toLowerCase()];
         const via = b ? chalk.dim(`(${b.provider}:${b.model})`) : "";
+        const m = room.getPersonaMood(p.id);
+        const moodBadge = m
+          ? chalk.hex("#ffb86c")(`[${m.emoji}${m.mood}]`)
+          : "";
         return (
-          chalk.hex(p.color || "#8be9fd").bold(`${p.avatar} <${p.nick}>`) + via
+          chalk.hex(p.color || "#8be9fd").bold(`${p.avatar} <${p.nick}>`) +
+          moodBadge +
+          via
         );
       })
       .join("  ") || chalk.dim("(none — use /summon)");

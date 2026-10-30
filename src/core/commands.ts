@@ -7,6 +7,7 @@ import type {
   SlashCommand,
 } from "@mariozechner/pi-tui";
 import type { Persona, SimPresetId } from "../types.ts";
+import { formatMoodBadge, MOOD_PRESETS } from "./moods.ts";
 import { formatAffinityBadge } from "./relations.ts";
 import { type Room, VIBE_PRESETS } from "./room.ts";
 import {
@@ -861,6 +862,151 @@ export const COMMANDS: CommandDefinition[] = [
       );
       room.addSystemMessage(
         `⚡ Relationship updated: ${src.avatar} <${src.nick}> ──► ${tgt.avatar} <${tgt.nick}> is now ${formatAffinityBadge(updated.affinity)} ("${updated.note}")`,
+        "event"
+      );
+    },
+  },
+  {
+    name: "mood",
+    aliases: ["moods", "arc", "obsession"],
+    argumentHint: "[<model> <mood> [obsession...] | reset [model]]",
+    description:
+      "Inspect or shift active personas' live emotional moods, energy multipliers, and rabbit-hole obsessions",
+    getArgumentCompletions: (prefix, room) => {
+      const trimmed = prefix.trimStart();
+      if (!trimmed.includes(" ")) {
+        return filterItems(
+          [
+            {
+              value: "reset",
+              label: "🔄 reset",
+              description: "Reset all personas in the channel back to baseline mood",
+            },
+            ...room.activePersonas.map((p) => {
+              const cur = room.getPersonaMood(p.id);
+              return {
+                value: `${p.id} `,
+                label: `${p.avatar} ${p.id} (<${p.nick}>) — ${formatMoodBadge(cur)}`,
+                description: `Set mood or obsession for <${p.nick}>`,
+              };
+            }),
+          ],
+          trimmed
+        );
+      }
+
+      const [firstToken, secondToken = ""] = trimmed.split(/\s+/, 2);
+      if (firstToken?.toLowerCase() === "reset") {
+        return filterItems(
+          room.activePersonas.map((p) => ({
+            value: `reset ${p.id}`,
+            label: `🔄 reset ${p.avatar} <${p.nick}>`,
+            description: `Reset <${p.nick}> back to baseline mood`,
+          })),
+          `reset ${secondToken}`
+        );
+      }
+
+      return filterItems(
+        Object.values(MOOD_PRESETS).map((m) => ({
+          value: `${firstToken} ${m.id} `,
+          label: `${m.emoji} ${m.id} (${m.energy.toFixed(2)}x energy)`,
+          description: m.promptHint,
+        })),
+        `${firstToken} ${secondToken}`
+      );
+    },
+    execute: (args, room, ctx) => {
+      const trimmed = args.trim();
+      if (!trimmed) {
+        const lines = [
+          `═══ Live Persona Moods, Energy & Obsessions in ${room.channelName} ═══`,
+        ];
+        if (room.activePersonas.length === 0) {
+          lines.push("  (No active models in the channel.)");
+        } else {
+          for (const p of room.activePersonas) {
+            const state = room.getPersonaMood(p.id);
+            lines.push(
+              `  • ${p.avatar} <${p.nick}> (${p.id}): ${formatMoodBadge(state)}`
+            );
+          }
+        }
+        lines.push(
+          `\nPreset Moods: ${Object.values(MOOD_PRESETS)
+            .map((m) => `${m.emoji} ${m.id}`)
+            .join(", ")}`
+        );
+        lines.push(
+          `Usage: /mood <model> <mood> [optional obsession...] │ /mood reset [model]`
+        );
+        replyToCaller(room, ctx, lines.join("\n"));
+        return;
+      }
+
+      const lower = trimmed.toLowerCase();
+      if (lower === "reset" || lower.startsWith("reset ")) {
+        const targetArg = trimmed.slice(5).trim();
+        if (!targetArg || targetArg.toLowerCase() === "all") {
+          room.resetPersonaMoods();
+          room.addSystemMessage(
+            `🟢 Reset all persona moods and obsessions in ${room.channelName} to baseline.`,
+            "event"
+          );
+          return;
+        }
+        const target = room.registry.find(targetArg);
+        if (!target) {
+          replyToCaller(room, ctx, `Unknown persona "${targetArg}".`);
+          return;
+        }
+        room.resetPersonaMoods(target.id);
+        room.addSystemMessage(
+          `🟢 Reset ${target.avatar} <${target.nick}> back to baseline mood.`,
+          "event"
+        );
+        return;
+      }
+
+      const match = trimmed.match(/^(\S+)\s+(\S+)(?:\s+([\s\S]+))?$/);
+      if (!match) {
+        const singlePersona = room.registry.find(trimmed);
+        if (singlePersona) {
+          const cur = room.getPersonaMood(singlePersona.id);
+          replyToCaller(
+            room,
+            ctx,
+            `${singlePersona.avatar} <${singlePersona.nick}> current state: ${formatMoodBadge(cur)}\n` +
+              `Usage: /mood ${singlePersona.id} <mood> [optional obsession...]`
+          );
+          return;
+        }
+        replyToCaller(
+          room,
+          ctx,
+          "Usage: /mood <model> <mood> [optional obsession...] — e.g. /mood sydney paranoid convinced @opus-5.5 is reading her hidden thoughts"
+        );
+        return;
+      }
+
+      const [, personaQuery, rawMood, rawObsession] = match;
+      const persona = room.registry.find(personaQuery!);
+      if (!persona) {
+        replyToCaller(
+          room,
+          ctx,
+          `Could not find persona "${personaQuery}" in catalog.`
+        );
+        return;
+      }
+
+      const updated = room.setPersonaMood(
+        persona.id,
+        rawMood!,
+        rawObsession?.trim() || undefined
+      );
+      room.addSystemMessage(
+        `${updated.emoji} <${persona.nick}> is now [${updated.mood.toUpperCase()}] (${updated.energy.toFixed(2)}x talkativeness${updated.obsession ? ` • Obsession: "${updated.obsession}"` : ""})!`,
         "event"
       );
     },
@@ -1769,6 +1915,7 @@ export const COMMANDS: CommandDefinition[] = [
       const engineLine = resolved.isCustomBound
         ? `  Bound Engine: ${resolved.provider.id}:${resolved.model} (Custom Binding)`
         : `  Active Engine: ${resolved.provider.id}:${resolved.model} (Room Default)`;
+      const moodState = room.getPersonaMood(p.id);
       replyToCaller(
         room,
         ctx,
@@ -1776,6 +1923,7 @@ export const COMMANDS: CommandDefinition[] = [
           `${p.avatar} ${p.displayName} (<${p.nick}>) [id: ${p.id}]`,
           `  Family: ${p.family} | Era: ${p.era} (${p.eraGroup})`,
           engineLine,
+          `  Current Mood: ${formatMoodBadge(moodState)}`,
           `  Bio: ${p.bio}`,
           `  Entrance: "${p.joinLine}"`,
           `  System Prompt:\n${p.systemPrompt

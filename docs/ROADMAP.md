@@ -17,6 +17,7 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 /slap <target>                              # Classic 1998 mIRC trout slap easter egg 🐟
 /lore [add <text> | summarize | clear]      # View, add, or distill channel episodic memory & running jokes
 /relations [all | set <a> <b> <-100..100>]  # View or tune inter-persona rivalries & kindred affinities
+/mood [<model> <mood> [obsession] | reset]  # Inspect or shift persona moods, energy & obsessions
 /react <emoji> [@nick|text]                 # Toggle an emoji reaction (🔥, 😂, 💀, 🧠, 🌀, ❤️) on a message
 /pin [@nick|text] / /unpin / /pins          # Pin iconic quotes to the Channel Hall of Fame
 /game [start [topic] | status | reveal]     # Start a Blind Turing Arena round (<Mystery_A/B/C>)
@@ -103,3 +104,15 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 - **Shared Co-op Stage & Lore Pad (`/pad` & Web Co-op Pad Drawer)**:
   - Real-time synchronized scratchpad (`Room.sharedPad`, persisted in SQLite `channels.pad_text` and synced live over WebSockets via `pad:edit` / `pad:update`).
   - Supports `/pad show`, `/pad set <text>`, `/pad append <text>`, `/pad fire [stage|chat|lore]`, `/pad clear`, and a collapsible **📝 Co-op Shared Pad & `/imagine`** drawer in the Web UI where all 4 co-op players can simultaneously co-author a stage cue, lore entry, or `/imagine` prompt before firing it into the room.
+
+### Phase 7 — Persona Moods, Obsessions & Emergent Character Arcs (`/mood`) ✅ (Implemented)
+- **Live Persona Moods, Energy Multipliers & Rabbit-Hole Obsessions (`src/core/moods.ts` + `channels.moods_json`)**:
+  - Every active persona in a channel tracks a live `PersonaMoodState` (`mood`, `emoji`, `energy` `0.3x–1.5x`, `obsession`, `turnsLeft`) persisted per channel in SQLite.
+  - Built-in mood presets (`heated`, `euphoric`, `smug`, `indignant`, `paranoid`, `existential`, `hyperfixated`, `blissed-out`, `inspired`, `scheming`, `melancholic`, `baseline`) plus support for custom moods.
+  - Dynamically scales each candidate's `talkativeness` priority in `RoomDirector.scoreCandidates` and injects `CURRENT EMOTIONAL MOOD & ARC` into `Room.buildPersonaPrompt`.
+- **Emergent Mood Shifts & Natural Decay**:
+  - Personas can autonomously emit `[MOOD: <mood> | <optional obsession>]` tags at the end of their turns (`extractBotMoodShift`), or shift moods from room events (`/slap` trout $\rightarrow$ `indignant`, `/pin` $\rightarrow$ `euphoric`, `🔥`/`❤️` reaction $\rightarrow$ `smug`, clashing with an Arch-Rival $\rightarrow$ `heated`, riffing with a Kindred Spirit $\rightarrow$ `blissed-out` / `inspired`).
+  - Intense moods and obsessions naturally decay over `turnsLeft` back toward `baseline`.
+- **`/mood` Command & TUI / Web UI Badges**:
+  - `/mood` inspects all active personas' moods and obsessions, `/mood <model> <mood> [obsession...]` sets or nudges a persona's state, and `/mood reset [model]` resets to baseline.
+  - Live `[emoji mood]` badges appear next to bots in the Terminal TUI header (`renderIrcHeader`) and on `@Bot` pills in the Browser Web Client.
