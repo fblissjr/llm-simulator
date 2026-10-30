@@ -43,6 +43,30 @@ export function extractThinkingAndBody(raw: string): {
   return { body: raw };
 }
 
+export function extractBotReactions(text: string): {
+  cleanBody: string;
+  reactions: Array<{ emoji: string; target?: string }>;
+} {
+  const reactions: Array<{ emoji: string; target?: string }> = [];
+  const cleanBody = text
+    .replace(
+      /\[\s*REACT\s*:\s*([^\s\]]+)(?:\s+([^\]]+?))?\s*\]/gi,
+      (_match, emoji: string, target?: string) => {
+        if (emoji) {
+          reactions.push({
+            emoji: emoji.trim(),
+            target: target?.trim() || undefined,
+          });
+        }
+        return "";
+      }
+    )
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  return { cleanBody, reactions };
+}
+
 export function formatTime(date = new Date()): string {
   const hh = String(date.getHours()).padStart(2, "0");
   const mm = String(date.getMinutes()).padStart(2, "0");
@@ -93,6 +117,8 @@ export class Room {
   private abortController: AbortController | null = null;
   private isTurnRunning = false;
   private pendingHumanFollowUp = false;
+  private debouncePromise: Promise<void> | null = null;
+  private conversationalMsgsSinceLore = 0;
   private ambientTimer: ReturnType<typeof setInterval> | null = null;
   private listeners = new Set<() => void>();
   private msgCounter = 0;
@@ -224,6 +250,8 @@ export class Room {
 
   private recordMessage(msg: ChatMessage, persist = true): ChatMessage {
     const existingIdx = this.messages.findIndex((m) => m.id === msg.id);
+    const wasStreaming =
+      existingIdx >= 0 ? Boolean(this.messages[existingIdx]?.streaming) : false;
     if (existingIdx >= 0) {
       this.messages[existingIdx] = msg;
     } else {
@@ -231,6 +259,9 @@ export class Room {
     }
     if (msg.kind === "user" || msg.kind === "model" || msg.kind === "emote") {
       this.lastActivityAt = Date.now();
+      if (persist && !msg.streaming && (existingIdx < 0 || wasStreaming)) {
+        this.conversationalMsgsSinceLore += 1;
+      }
     }
     if (persist && this.db) {
       this.db.upsertMessage(this.channelName, msg);
@@ -527,12 +558,14 @@ export class Room {
 
   public clearLore(): void {
     this.lore = [];
+    this.conversationalMsgsSinceLore = 0;
     this.db?.setChannelLore(this.channelName, this.lore);
     this.callbacks?.onPresenceChange?.();
     this.notify();
   }
 
   public async summarizeChannelLore(): Promise<string[]> {
+    this.conversationalMsgsSinceLore = 0;
     const conversational = this.messages.filter(
       (m) => m.kind === "user" || m.kind === "model" || m.kind === "emote"
     );
@@ -768,7 +801,8 @@ ${otherModels || "(No other AI models currently in the room)"}
 IMPORTANT FORMAT RULES:
 - Do NOT prefix your response with "<${speaker.nick}>:" — jump straight into your message (or optional <thinking>...</thinking> block if that fits your persona).
 - ${styleInstruction}
-- Notice which specific human (<@nick>) or AI model (<ModelNick>) spoke, and address or call them out directly by @Nick when reacting or arguing!`;
+- Notice which specific human (<@nick>) or AI model (<ModelNick>) spoke, and address or call them out directly by @Nick when reacting or arguing!
+- Optional: You can include [REACT: 🔥] (or 😂, 💀, 🧠, 🌀, ❤️) at the end of your reply to slap an emoji reaction onto the previous message.`;
 
     const contextWindow = Math.max(6, Math.min(60, this.config.contextMessages || 24));
     const recentHistory = this.messages
@@ -806,6 +840,48 @@ Respond now as <${speaker.nick}>:`;
     this.ambientConsecutiveCount = 0;
   }
 
+  private async triggerHumanRoomTurn(): Promise<void> {
+    if (this.config.humanDebounceMs <= 0) {
+      await this.runRoomTurn({
+        maxSpeakers: this.config.maxSpeakersPerTurn,
+        forceAllSteps: false,
+      });
+      return;
+    }
+
+    if (this.debouncePromise) {
+      await this.debouncePromise;
+      return;
+    }
+
+    this.debouncePromise = (async () => {
+      try {
+        while (
+          Date.now() - this.lastHumanActivityAt <
+          this.config.humanDebounceMs
+        ) {
+          const remaining = Math.max(
+            5,
+            this.config.humanDebounceMs -
+              (Date.now() - this.lastHumanActivityAt)
+          );
+          await new Promise<void>((r) => setTimeout(r, remaining));
+        }
+      } finally {
+        this.debouncePromise = null;
+      }
+
+      if (!this.isTurnRunning) {
+        await this.runRoomTurn({
+          maxSpeakers: this.config.maxSpeakersPerTurn,
+          forceAllSteps: false,
+        });
+      }
+    })();
+
+    await this.debouncePromise;
+  }
+
   /**
    * Posts a human message (attributed to their specific @nick) and triggers the reactive Director turn.
    */
@@ -836,10 +912,7 @@ Respond now as <${speaker.nick}>:`;
       return;
     }
 
-    await this.runRoomTurn({
-      maxSpeakers: this.config.maxSpeakersPerTurn,
-      forceAllSteps: false,
-    });
+    await this.triggerHumanRoomTurn();
   }
 
   /**
@@ -872,10 +945,7 @@ Respond now as <${speaker.nick}>:`;
       return;
     }
 
-    await this.runRoomTurn({
-      maxSpeakers: this.config.maxSpeakersPerTurn,
-      forceAllSteps: false,
-    });
+    await this.triggerHumanRoomTurn();
   }
 
   /**
@@ -1138,7 +1208,7 @@ Respond now as <${speaker.nick}>:`;
             rawAccumulated += chunk;
             const parsed = extractThinkingAndBody(rawAccumulated);
             msg.thinking = parsed.thinking;
-            msg.text = parsed.body;
+            msg.text = extractBotReactions(parsed.body).cleanBody;
             this.callbacks?.onMessageUpsert?.(msg);
             this.notify();
           },
@@ -1146,11 +1216,31 @@ Respond now as <${speaker.nick}>:`;
 
         msg.streaming = false;
         const finalParsed = extractThinkingAndBody(rawAccumulated);
+        const { cleanBody, reactions: botReactions } = extractBotReactions(
+          finalParsed.body.trim()
+        );
         msg.thinking = finalParsed.thinking;
         msg.text =
-          finalParsed.body.trim() ||
+          cleanBody ||
           (rawAccumulated.trim() ? rawAccumulated.trim() : "...");
         this.recordMessage(msg, true);
+
+        // Apply any autonomous [REACT: <emoji> [@target]] tags emitted by the bot
+        if (botReactions.length > 0) {
+          const prevConversational = [...this.messages]
+            .reverse()
+            .find(
+              (m) =>
+                m.id !== msg.id &&
+                (m.kind === "user" || m.kind === "model" || m.kind === "emote")
+            );
+          for (const rx of botReactions) {
+            const targetIdOrQuery = rx.target ?? prevConversational?.id;
+            if (targetIdOrQuery) {
+              this.toggleReaction(rx.emoji, speaker.nick, targetIdOrQuery);
+            }
+          }
+        }
 
         // Observe inter-bot sentiment & update dynamic affinity/rivalry graph
         const mentionedPeers = this.director.findMentionedCandidates(
@@ -1169,6 +1259,15 @@ Respond now as <${speaker.nick}>:`;
           break;
         }
       }
+
+      // Automatic background lore roll-up when enough new messages have accumulated
+      if (
+        this.conversationalMsgsSinceLore >=
+        Math.max(6, this.config.contextMessages)
+      ) {
+        await this.summarizeChannelLore();
+      }
+
       return true;
     } catch (err) {
       if (!controller.signal.aborted) {

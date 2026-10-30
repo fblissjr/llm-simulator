@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleSlashCommand } from "../src/core/commands.ts";
 import { RelationGraph } from "../src/core/relations.ts";
-import { Room } from "../src/core/room.ts";
+import { extractBotReactions, Room } from "../src/core/room.ts";
 import { RoomDirector } from "../src/engine/director.ts";
+import { GeminiEngine } from "../src/engine/gemini.ts";
+import type { LLMProvider } from "../src/engine/types.ts";
 import { SimDatabase } from "../src/server/db.ts";
 import { formatChatMessage } from "../src/ui/theme.ts";
 
@@ -202,5 +204,84 @@ describe("Phase 3: Inter-Persona Relations, Channel Lore & Reactions/Pins", () =
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("humanDebounceMs coalesces rapid human messages, bots autonomously apply [REACT: emoji] tags, and lore auto-rolls up", async () => {
+    // 1. Unit test extractBotReactions parser
+    const parsed = extractBotReactions(
+      "That benchmark claim is hilarious! [REACT: 😂] [REACT: 🔥 @player1]"
+    );
+    expect(parsed.cleanBody).toBe("That benchmark claim is hilarious!");
+    expect(parsed.reactions).toEqual([
+      { emoji: "😂", target: undefined },
+      { emoji: "🔥", target: "@player1" },
+    ]);
+
+    // 2. Test humanDebounceMs coalescing + autonomous bot [REACT: 🔥] + auto-lore rollup in Room
+    let streamCalls = 0;
+    const gemini = new GeminiEngine({ provider: "gemini" });
+    const mockProvider: LLMProvider = {
+      id: "mock",
+      displayName: "Mock Provider",
+      defaultModel: "mock-flash",
+      fastModel: "mock-lite",
+      isConfigured: () => true,
+      listModels: async () => [{ id: "mock-flash", provider: "mock" }],
+      getCachedModels: () => [{ id: "mock-flash", provider: "mock" }],
+      generateJson: async <T>() =>
+        ({
+          bullets: ["Auto-summarized lore: @player1 and @Sydney debated 1998 IRC."],
+        }) as unknown as T,
+      streamText: async (req) => {
+        streamCalls += 1;
+        req.onDelta("I am reacting to your rapid-fire messages! [REACT: 🔥]");
+        return "I am reacting to your rapid-fire messages! [REACT: 🔥]";
+      },
+    };
+    gemini.registerProvider(mockProvider);
+    gemini.activeProvider = "mock";
+
+    const room = new Room({
+      channelName: "#debounce-test",
+      gemini,
+      starterIds: ["sydney"],
+    });
+    room.updateConfigValue("maxSpeakersPerTurn", "1");
+    room.updateConfigValue("directorMode", "heuristic");
+    room.updateConfigValue("humanDebounceMs", "60");
+    room.updateConfigValue("contextMessages", "6");
+
+    // Pre-seed 8 conversational messages so the next 2 human + 1 model messages cross the 10-message auto-lore threshold
+    for (let i = 0; i < 8; i++) {
+      room.toggleReaction("🧠", "player1"); // no-op if empty
+    }
+
+    // Fire two rapid human messages 10ms apart; they should coalesce into a SINGLE bot turn
+    const p1 = room.postUserMessage("First line of thought...", "player1");
+    await new Promise((r) => setTimeout(r, 10));
+    const p2 = room.postUserMessage("Second line right after!", "player1");
+    await Promise.all([p1, p2]);
+
+    expect(streamCalls).toBe(1);
+
+    // Verify the bot stripped [REACT: 🔥] from its own text and applied 🔥 to the preceding user message
+    const modelMsgs = room.messages.filter((m) => m.kind === "model");
+    expect(modelMsgs.length).toBe(1);
+    expect(modelMsgs[0]!.text).toBe(
+      "I am reacting to your rapid-fire messages!"
+    );
+
+    const userMsgs = room.messages.filter((m) => m.kind === "user");
+    expect(userMsgs.length).toBe(2);
+    expect(userMsgs[1]!.reactions?.["🔥"]).toEqual(["@Sydney"]);
+
+    // Now push enough messages to cross the 10-message auto-lore roll-up threshold
+    room.updateConfigValue("humanDebounceMs", "0");
+    for (let i = 0; i < 4; i++) {
+      await room.postUserMessage(`Follow-up message ${i}`, "player1");
+    }
+    expect(
+      room.lore.some((l) => l.includes("Auto-summarized lore"))
+    ).toBe(true);
   });
 });

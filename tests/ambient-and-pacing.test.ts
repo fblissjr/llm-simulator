@@ -51,6 +51,7 @@ describe("Ambient Heartbeat, Safety Caps, Human Typing Pause & IRC Commands", ()
         ambientMaxConsecutive: 2,
         readingDelayMs: 0,
         interSpeakerDelayMs: 0,
+        humanDebounceMs: 0,
       },
     });
 
@@ -113,6 +114,7 @@ describe("Ambient Heartbeat, Safety Caps, Human Typing Pause & IRC Commands", ()
         humanInterruptMode: "yield",
         readingDelayMs: 0,
         interSpeakerDelayMs: 0,
+        humanDebounceMs: 0,
         ambientEnabled: false,
       },
     });

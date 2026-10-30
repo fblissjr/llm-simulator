@@ -100,6 +100,7 @@ describe("RoomDirector: Multi-Bot Chaining, Talkativeness, Recency & @Mentions",
         continuationProb: 0.9,
         readingDelayMs: 0,
         interSpeakerDelayMs: 0,
+        humanDebounceMs: 0,
         ambientEnabled: false,
       },
     });
