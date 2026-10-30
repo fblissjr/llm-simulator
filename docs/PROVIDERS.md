@@ -30,6 +30,7 @@ Uses the official `@google/genai` **Interactions API** (`client.interactions.cre
 - **Default Models**:
   - Persona streaming: `gemini-3.8-flash`
   - Fast Room Director & Persona Forge JSON: `gemini-3.5-flash-lite`
+  - Multimodal `/imagine` & `[IMAGINE: ...]` era artwork: `gemini-nano-banana-2.1` (with automatic offline Dracula CRT SVG + ANSI `▀` half-block fallback)
 - **Environment Variables**:
   ```bash
   export GEMINI_API_KEY="your-gemini-api-key"

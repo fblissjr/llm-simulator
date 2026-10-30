@@ -27,7 +27,7 @@
   - `src/engine/director.ts` — `RoomDirector`: Reactive post-turn speaker selector (`pickNextSpeaker`) with deterministic heuristic fallback when offline or if a local checkpoint does not support structured JSON.
 - `src/personas/` — Persona Catalog & Forge:
   - `src/personas/builtin.ts` — 28 built-in historical personas across 4 eras (`1966–2016`, `2019–2022`, `2022–2023`, `2024–2026`).
-  - `src/personas/registry.ts` — `PersonaRegistry`: Fuzzy lookup (`find`), custom `./personas/*.json` loader, SQLite custom persona sync, and dynamic on-the-fly persona synthesis (`summonOrCreate`) when a user summons an unknown model name.
+  - `src/personas/registry.ts` — `PersonaRegistry`: Fuzzy lookup (`find`), custom `./personas/*.json` & `./scenarios/*.json` loader, SQLite `custom_personas` & `custom_scenarios` sync, Persona Forge CRUD (`forgeFromSpec`, `clonePersona`, `synthesizePersona`, `exportToDisk`, `deleteCustom`), custom scenario management (`saveScenario`, `synthesizeScenario`, `deleteCustomScenario`), and dynamic on-the-fly persona synthesis (`summonOrCreate`).
 - `src/core/` — Room State, Simulation Config & Slash Commands:
   - `src/core/sim-config.ts` — `SimConfig` presets (`manual`, `chill`, `lively`, `banter`, `chaos`), 30 granular simulation & emergent feature variable descriptors across 6 categories (`pacing`, `director`, `ambient`, `emergent`, `memory`, `display`), `applySimConfigMutation`, and `BUILTIN_SCENARIOS`.
   - `src/core/relations.ts` — `RelationGraph` & `BUILTIN_RELATIONS`: 18 historical inter-persona rivalries/affinities (`-100` Arch-Rivals to `+100` Kindred/Bliss), SQLite persistence (`persona_relations`), dynamic post-turn sentiment shifts (`observeBotTurn`), and `RoomDirector` candidate priority boosts.
@@ -38,10 +38,10 @@
 - `src/server/` — Multiplayer Co-op & Persistence:
   - `src/server/db.ts` — `SimDatabase` (`bun:sqlite` in WAL mode): Persists `channels`, `channel_bots`, `messages`, `custom_personas`, `custom_scenarios`, `persona_bindings`, `persona_relations`, and `server_settings` (`global_engine`).
   - `src/server/hub.ts` — `ChannelHub` (`Bun.serve` HTTP + WebSocket server): Enforces `MAX_HUMANS = 4` (DOOM-style 4-player co-op cap) plus read-only `?spectate=1` spectator slots, `?key=` passkey validation, per-guest message cooldowns, cross-channel bot roaming (`roamBot`), and multi-channel synchronization.
-  - `src/server/web-client.ts` — Self-contained Retro CRT / IRC HTML/JS browser client served at `GET /?key=<passkey>` with interactive `<button type="button">` `@Nick` pills, collapsible `<details>` thought traces, and inline markdown rendering.
+  - `src/server/web-client.ts` — Self-contained Retro CRT / IRC HTML/JS browser client served at `GET /?key=<passkey>` with interactive `<button type="button">` `@Nick` pills, collapsible `<details>` thought traces & control drawers, `<dialog id="settings-dialog">` Control Center, `<dialog id="forge-dialog">` Persona Forge & Scenario Builder Studio, and inline markdown rendering.
   - `src/server/tunnel.ts` — `TunnelManager`: Spawns outbound `cloudflared tunnel` for `/share` and detects LAN/Tailscale IPs.
 - `src/ui/` — Terminal UI (`@mariozechner/pi-tui`):
-  - `src/ui/app.ts` — `ChatroomApp` (supports both WebSocket client mode and standalone `Room` mode, `PageUp`/`PageDown` scrollback, and animated braille status spinner).
+  - `src/ui/app.ts` — `ChatroomApp` (supports both WebSocket client mode and standalone `Room` mode, `Ctrl+O` Settings overlay, `Ctrl+F` Forge & Scenario Studio overlay, `PageUp`/`PageDown` scrollback, and animated braille status spinner).
   - `src/ui/theme.ts` — Retro IRC header, per-persona `(provider:model)` binding badges, and inline markdown/thought styling.
 
 ## Critical Invariants & Provider Contracts

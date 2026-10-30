@@ -13,7 +13,7 @@ Summon and direct **28 built-in iconic AI personas** spanning 60 years of langua
 3. **`heylookitsanllm` (`heylook`)**: Connects to your local MLX / GGUF server via its Anthropic Messages-conformant `POST /v1/messages` and `GET /v1/models` endpoints (default `http://127.0.0.1:8000`, configurable via `HEYLOOK_URL`). Automatically discovers resident checkpoints, streams native `thinking_delta` + `text_delta` blocks, and reuses the single loaded model so `max_loaded_models = 1` never thrashes VRAM.
 
 📖 **See the full [Provider Setup & Multi-Engine Guide (`docs/PROVIDERS.md`)](./docs/PROVIDERS.md)** for environment variables, local `heylookitsanllm` setup, hybrid `/bind` arenas, and adding new providers.
-🎛️ **See the [Simulation Variables & Roadmap Guide (`docs/ROADMAP.md`)](./docs/ROADMAP.md)** for all 5 pacing presets (`manual`, `chill`, `lively`, `banter`, `chaos`), 19+ granular `/config` knobs, ambient chatter safety caps, and curated `/scenario` showdowns.
+🎛️ **See the [Simulation Variables & Roadmap Guide (`docs/ROADMAP.md`)](./docs/ROADMAP.md)** for all 5 pacing presets (`manual`, `chill`, `lively`, `banter`, `chaos`), 30 granular `/settings` & `/config` knobs, ambient chatter safety caps, `/forge` Persona Studio, and curated + custom `/scenario` showdowns.
 
 ## Quickstart
 
@@ -36,7 +36,7 @@ bun run start --provider heylook
 # Start as Host and auto-open a 4-player Co-op tunnel
 bun run start --nick player1 --channel "#latent-space" --share
 
-# Connect from another terminal on LAN
+# Connect from another terminal on LAN (append &spectate=1 to watch in Read-Only Spectator Mode)
 bun run connect "ws://192.168.1.x:4321/ws?key=<passkey>" --nick alice
 
 # Run a dedicated headless server
@@ -47,6 +47,8 @@ bun run server --port 4321
 
 - `/summon <model...>` (or `/join`): Summon one or more models into the current channel (e.g. `/summon eliza parry galactica deepseek-r1 qwen` or `/summon hal-9000` to forge a new persona on the fly!)
 - `/banish <model|all>` (or `/kick`): Banish a model (or `all`) from the current channel
+- `/forge [new | auto <id> <concept> | clone <src> <id> | edit <id> <field> <val> | export <id> | delete <id>]` (or `/persona`, `/craft`, `Ctrl+F` in TUI, `🔨 Forge` button in Web UI): Create, auto-synthesize, clone, live-edit, export (`./personas/<id>.json`), or delete custom AI personas
+- `/make-scenario [snapshot <id> <title> | new ... | auto <id> <concept> | delete <id>]` (or `/forge-scenario`, `/scene-forge`): Snapshot the current room's cast/vibe/preset, craft custom multi-bot showdowns, or auto-synthesize scenarios (`./scenarios/<id>.json` + SQLite)
 - `/provider [gemini|openrouter|heylook] [url]`: View all providers or switch the room's global inference provider
 - `/models [gemini|openrouter|heylook]`: Discover and list available models on a provider (queries `GET /v1/models` on `heylook` or OpenRouter)
 - `/engine <flash|lite|model|provider:model>`: Switch the active room model (e.g. `/engine openrouter:deepseek/deepseek-r1` or `/engine heylook:Qwen3-30B`)
@@ -54,7 +56,7 @@ bun run server --port 4321
 - `/vibe <chat|debate|roast|chaos|custom text...>`: Change the channel's scenario/directive
 - `/settings [pacing|director|ambient|emergent|memory|display | <key> [val]]` (or `/menu`, `/options`, `Ctrl+O` in TUI, `⚙️ Settings` button in Web UI): Open the interactive Settings Control Center to toggle or tune all 30 granular simulation & emergent AI settings
 - `/config [preset <manual|chill|lively|banter|chaos> | set <key> <val> | reset]`: Inspect or tune granular chatroom pacing, multi-bot chaining, reading delays, emergent AI toggles, and ambient life
-- `/scenario [1972-arpanet|turing-trial|benchmark-roast|code-review-hell|bliss-spiral]`: Launch a curated multi-model showdown (summons cast, sets vibe & pacing, and fires an opening event)
+- `/scenario [<id> | snapshot <id> <title> | delete <id>]`: Launch any built-in (`1972-arpanet`, `turing-trial`, `benchmark-roast`, `code-review-hell`, `bliss-spiral`) or custom multi-model showdown scenario
 - `/me <action>`: Perform a classic IRC action emote (`* @nick pours a cup of coffee`)
 - `/slap <target>`: Classic 1998 mIRC easter egg (`* @nick slaps <Target> around a bit with a large 1998 mIRC trout 🐟`)
 - `/lore [add <fact> | summarize | clear]`: View, add, or distill persistent channel lore & running jokes (automatically injected into bot prompts)
@@ -83,8 +85,9 @@ bun run server --port 4321
 - `/inspect <model>`: Inspect a model's full persona sheet, bound engine, and system prompt
 - `/shush` (or `Esc`): Interrupt any currently streaming turn
 - `/clear`, `/help`, `/quit`
-- **Keyboard Shortcuts (Terminal TUI)**: `Tab` (autocomplete `/commands`, models, `@Human`, and `@Bot`), `Ctrl+O` (open/close interactive Settings Control Center), `Ctrl+T` (cycle `<thinking>` display: compact / expanded / hidden), `PgUp` / `PgDn` (scroll through SQLite channel history), `Esc` (interrupt streaming or close Settings modal), `Ctrl+C` (exit).
+- **Keyboard Shortcuts (Terminal TUI)**: `Tab` (autocomplete `/commands`, aliases, models, `@Human`, and `@Bot`), `Ctrl+O` (open/close interactive Settings Control Center with `↑`/`↓` & `←`/`→`), `Ctrl+F` (open/close interactive Persona Forge & Scenario Builder Studio), `Ctrl+T` (cycle `<thinking>` display: compact / expanded / hidden), `PgUp` / `PgDn` (scroll through SQLite channel history), `Esc` (interrupt streaming or close active modal), `Ctrl+C` (exit).
 
-## Extending Personas
+## Extending Personas & Custom Scenarios
 
-Drop any `.json` file into `./personas/` (including optional `"provider"` and `"model"` fields if you want that persona pre-bound to a specific provider), or run `/summon <any-name>` in-game to synthesize and persist a new persona automatically.
+- **Interactive Persona Forge (`/forge`)**: Press `Ctrl+F` in the Terminal TUI, click **🔨 Forge** in the Browser Web Client, or run `/forge auto <id> <concept>`, `/forge clone <source> <new-id>`, or `/forge new ...` to create and edit custom personas persisted to both SQLite (`custom_personas`) and `./personas/<id>.json`.
+- **Custom Scenario Builder (`/make-scenario`)**: Run `/make-scenario snapshot <id> <title>` to capture your current room's cast, vibe, and pacing preset as a reusable showdown persisted to SQLite (`custom_scenarios`) and `./scenarios/<id>.json`, then launch it anytime with `/scenario <id>`.

@@ -136,6 +136,10 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 - **Browser Web Client `<dialog id="settings-dialog">` Control Center**:
   - Native modal `<dialog closedby="any" aria-labelledby="settings-title">` opened via the header `⚙️ Settings` button, the Sim Config drawer, or typing `/settings` in chat, featuring categorized `<fieldset>` controls synced in real time across all 4 co-op players.
 
+### Phase 9 — Cross-Phase Integration, Round-Trip Replay & Co-op UX Polish ✅ (Implemented)
+- **`/export` ↔ `/replay` Round-Trip Fidelity**: `/export` writes active persona moods (`[✨ euphoric]`), channel `lore` bullets, `[📌 PINNED]` markers, and reaction tallies (`[🔥x2]`); `Room.replayTranscript` parses both multi-line `/export` Markdown blocks (including `> 💭` thinking traces and emotes) and single-line bullet logs.
+- **Live Co-op Scratchpad Prompt Injection**: Non-empty `Room.sharedPad` notes are injected directly into `Room.buildPersonaPrompt` (`CO-OP SHARED SCRATCHPAD`) on every turn alongside live `🎭 ARENA` header badges and command alias autocomplete.
+
 ### Phase 10 — Interactive Persona Forge & Scenario Builder (`/forge` & `/make-scenario`) ✅ (Implemented)
 - **Persona Forge Engine (`PersonaRegistry` + `/forge`)**:
   - Create custom personas from structured fields (`/forge new <id> | <nick> | <avatar> | <era> | <family> | <bio> | <systemPrompt>`), synthesize from a concept prompt (`/forge auto <id> <concept...>`), clone & fork existing models (`/forge clone <source> <new-id> [new-nick] [| <prompt tweak>]`), live-edit active persona fields (`/forge edit <model> <field> <value>`), export to `./personas/<id>.json` (`/forge export <model>`), or delete/restore (`/forge delete <id>`).
