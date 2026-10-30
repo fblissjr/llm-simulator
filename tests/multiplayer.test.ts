@@ -84,7 +84,7 @@ describe("4-Player DOOM Co-op ChannelHub Server", () => {
 
       // 3. Connect 4 human players (1 Host + 3 Guests)
       const p1 = await connectTestClient(
-        `ws://127.0.0.1:${port}/ws?key=doom1993&nick=fred&host=1`
+        `ws://127.0.0.1:${port}/ws?key=doom1993&nick=player1&host=1`
       );
       const p2 = await connectTestClient(
         `ws://127.0.0.1:${port}/ws?key=doom1993&nick=alice`
@@ -109,7 +109,24 @@ describe("4-Player DOOM Co-op ChannelHub Server", () => {
       );
       expect(fifthRes.status).toBe(403);
 
-      // 5. Test /lock by Host (@fred) and verify Guest (@alice) cannot /banish while locked
+      // 4b. Verify a 5th viewer CAN connect with &spectate=1 in Read-Only Spectator Mode!
+      const spec = await connectTestClient(
+        `ws://127.0.0.1:${port}/ws?key=doom1993&nick=viewer&spectate=1`
+      );
+      const specSync = await spec.waitForPacket((p) => p.type === "sync");
+      expect(specSync.type === "sync" && specSync.isSpectator).toBe(true);
+      await p1.waitForPacket(
+        (p) => p.type === "presence" && p.spectatorCount === 1
+      );
+      spec.ws.send(JSON.stringify({ type: "chat", text: "Can I talk?" }));
+      const specNotice = await spec.waitForPacket(
+        (p) =>
+          p.type === "notice" && p.message.text.includes("read-only mode")
+      );
+      expect(specNotice.type).toBe("notice");
+      spec.ws.close();
+
+      // 5. Test /lock by Host (@player1) and verify Guest (@alice) cannot /banish while locked
       p1.ws.send(JSON.stringify({ type: "command", raw: "/lock" }));
       await p2.waitForPacket((p) => p.type === "presence" && p.locked === true);
 
@@ -128,7 +145,7 @@ describe("4-Player DOOM Co-op ChannelHub Server", () => {
         arenaSync.type === "sync" && arenaSync.state.channelName
       ).toBe("#arena");
 
-      // 7. Test /kickplayer by Host (@fred) kicking @bob
+      // 7. Test /kickplayer by Host (@player1) kicking @bob
       p1.ws.send(JSON.stringify({ type: "command", raw: "/kickplayer bob" }));
       const kickedPkt = await p3.waitForPacket((p) => p.type === "kicked");
       expect(kickedPkt.type).toBe("kicked");

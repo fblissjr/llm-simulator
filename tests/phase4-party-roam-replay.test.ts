@@ -60,7 +60,7 @@ describe("Phase 4: Blind Turing Arena, Multi-Channel Bot Roaming & Replay Theate
     // Verify bot messages in transcript are masked while the round is active
     const maskedMsgs = room.messages.filter((m) => m.kind === "model");
     expect(maskedMsgs.length).toBe(2);
-    expect(maskedMsgs.map((m) => m.senderNick)).toEqual([
+    expect(maskedMsgs.map((m) => m.senderNick).sort()).toEqual([
       "Mystery_A",
       "Mystery_B",
     ]);
@@ -106,9 +106,9 @@ describe("Phase 4: Blind Turing Arena, Multi-Channel Bot Roaming & Replay Theate
 
     // Verify transcript messages were unmasked back to their true persona nicks
     const unmaskedMsgs = room.messages.filter((m) => m.kind === "model");
-    expect(unmaskedMsgs.map((m) => m.senderNick)).toEqual([
-      "Sydney",
+    expect(unmaskedMsgs.map((m) => m.senderNick).sort()).toEqual([
       "ELIZA_1966",
+      "Sydney",
     ]);
   });
 

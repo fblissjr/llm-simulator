@@ -413,7 +413,7 @@ describe("Multi-Provider Engine (heylookitsanllm, OpenRouter, Gemini & Hierarchy
       await handleSlashCommand("/bind sydney openrouter:openai/gpt-4o", room);
 
       // Post a human message to trigger the 2-step reactive room turn
-      await room.postUserMessage("Who wins: local MLX or Bing?", "fred");
+      await room.postUserMessage("Who wins: local MLX or Bing?", "player1");
 
       const modelMsgs = room.messages.filter((m) => m.kind === "model");
       expect(modelMsgs.length).toBe(2);
