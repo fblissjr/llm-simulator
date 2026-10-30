@@ -31,7 +31,8 @@ import {
 class SettingsModalComponent implements Component {
   constructor(
     private titleFn: () => string,
-    public readonly list: SettingsList
+    public readonly list: SettingsList,
+    private onStepDirection: (direction: 1 | -1) => void
   ) {}
 
   invalidate(): void {
@@ -39,6 +40,14 @@ class SettingsModalComponent implements Component {
   }
 
   handleInput(data: string): void {
+    if (matchesKey(data, "left")) {
+      this.onStepDirection(-1);
+      return;
+    }
+    if (matchesKey(data, "right")) {
+      this.onStepDirection(1);
+      return;
+    }
     this.list.handleInput(data);
   }
 
@@ -47,7 +56,7 @@ class SettingsModalComponent implements Component {
     const border = chalk.hex("#bd93f9")("═".repeat(Math.max(10, width - 2)));
     const header = chalk.bgHex("#282a36").hex("#50fa7b").bold(` ${this.titleFn()} `);
     const sub = chalk.hex("#6272a4")(
-      "  ↑/↓ navigate • Enter/Space cycle value • Esc or Ctrl+O close"
+      "  ↑/↓ navigate • ←/→ or Enter/Space step value • Esc or Ctrl+O close"
     );
     const bodyLines = this.list.render(innerWidth);
     return [
@@ -84,6 +93,7 @@ export class ChatroomApp {
   private localInviteUrl?: string;
   private maxHumans = 4;
   private spectatorCount = 0;
+  private arenaActive?: boolean;
   private apiOnline?: boolean;
   private typingUsers: string[] = [];
   private lastTypingSentAt = 0;
@@ -199,7 +209,7 @@ export class ChatroomApp {
       `Welcome to ${this.room.channelName} — The Multi-Era LLM Simulation Chatroom (1966–2026)!\n` +
         `  Currently in channel: ${starterList}\n` +
         `  • Type a message (or @Nick) to chat with the room (Preset: ${this.room.config.preset.toUpperCase()} — 1 to ${this.room.config.maxSpeakersPerTurn} bots react naturally!).\n` +
-        `  • Use /summon <model>, /config [preset|set], /scenario <id>, /vibe, /me <action>, /slap <nick>, /whisper, or /share.`,
+        `  • Use /settings (Ctrl+O), /summon <model>, /scenario <id>, /imagine <prompt>, /pad, /mood, /game, /me, /slap, or /share.`,
       "system",
       false
     );
@@ -273,6 +283,9 @@ export class ChatroomApp {
       if (s.sharedPad !== undefined) {
         this.room.sharedPad = s.sharedPad;
       }
+      if (s.arenaActive !== undefined) {
+        this.arenaActive = s.arenaActive;
+      }
       this.typingUsers = s.typingUsers ?? [];
       this.apiOnline = s.apiOnline;
       this.locked = s.locked;
@@ -312,8 +325,14 @@ export class ChatroomApp {
       if (packet.config) {
         this.room.config = packet.config;
       }
+      if (packet.lore) {
+        this.room.lore = packet.lore;
+      }
       if (packet.sharedPad !== undefined) {
         this.room.sharedPad = packet.sharedPad;
+      }
+      if (packet.arenaActive !== undefined) {
+        this.arenaActive = packet.arenaActive;
       }
       this.typingUsers = packet.typingUsers ?? [];
       this.apiOnline = packet.apiOnline;
@@ -504,27 +523,29 @@ export class ChatroomApp {
       return;
     }
 
+    const applySettingChange = (id: string, newValue: string) => {
+      const rawCmd =
+        id === "preset"
+          ? `/config preset ${newValue}`
+          : `/config set ${id} ${newValue}`;
+      if (this.wsUrl) {
+        this.sendClientPacket({ type: "command", raw: rawCmd });
+      } else {
+        void handleSlashCommand(rawCmd, this.room, {
+          senderNick: this.selfNick,
+          isHost: this.isHost,
+        }).then(() => {
+          this.refreshSettingsMenuValues();
+        });
+      }
+    };
+
     const items = this.getSettingsItems();
     const list = new SettingsList(
       items,
       14,
       settingsListTheme,
-      (id, newValue) => {
-        const rawCmd =
-          id === "preset"
-            ? `/config preset ${newValue}`
-            : `/config set ${id} ${newValue}`;
-        if (this.wsUrl) {
-          this.sendClientPacket({ type: "command", raw: rawCmd });
-        } else {
-          void handleSlashCommand(rawCmd, this.room, {
-            senderNick: this.selfNick,
-            isHost: this.isHost,
-          }).then(() => {
-            this.refreshSettingsMenuValues();
-          });
-        }
-      },
+      applySettingChange,
       () => {
         this.closeSettingsMenu();
       },
@@ -534,15 +555,72 @@ export class ChatroomApp {
     this.settingsModal = new SettingsModalComponent(
       () =>
         `⚙️ Simulation & Feature Control Center — ${this.room.channelName} [Preset: ${this.room.config.preset.toUpperCase()}]`,
-      list
+      list,
+      (direction) => {
+        this.stepSelectedSetting(direction, applySettingChange);
+      }
     );
-    this.settingsOverlay = this.tui.showOverlay(this.settingsModal, {
-      width: "85%",
-      minWidth: 56,
-      maxHeight: "85%",
-      anchor: "center",
-    });
+    if (this.isStarted) {
+      this.settingsOverlay = this.tui.showOverlay(this.settingsModal, {
+        width: "85%",
+        minWidth: 56,
+        maxHeight: "85%",
+        anchor: "center",
+      });
+    } else {
+      let hidden = false;
+      this.settingsOverlay = {
+        hide: () => {
+          hidden = true;
+        },
+        setHidden: (h: boolean) => {
+          hidden = h;
+        },
+        isHidden: () => hidden,
+        focus: () => {},
+        unfocus: () => {},
+        isFocused: () => !hidden,
+      };
+    }
     this.syncViews();
+  }
+
+  public stepSelectedSetting(
+    direction: 1 | -1,
+    onChange?: (id: string, newValue: string) => void
+  ): boolean {
+    if (!this.settingsModal) return false;
+    const listAny = this.settingsModal.list as unknown as {
+      items: SettingItem[];
+      selectedIndex: number;
+    };
+    const item = listAny.items?.[listAny.selectedIndex];
+    if (!item || !item.values || item.values.length === 0) return false;
+    const len = item.values.length;
+    const curIdx = item.values.indexOf(item.currentValue);
+    const nextIdx =
+      curIdx >= 0
+        ? (curIdx + direction + len) % len
+        : direction > 0
+          ? 0
+          : len - 1;
+    const newValue = item.values[nextIdx]!;
+    item.currentValue = newValue;
+    if (onChange) {
+      onChange(item.id, newValue);
+    } else {
+      const rawCmd =
+        item.id === "preset"
+          ? `/config preset ${newValue}`
+          : `/config set ${item.id} ${newValue}`;
+      void handleSlashCommand(rawCmd, this.room, {
+        senderNick: this.selfNick,
+        isHost: this.isHost,
+      }).then(() => {
+        this.refreshSettingsMenuValues();
+      });
+    }
+    return true;
   }
 
   public closeSettingsMenu(): void {
@@ -617,6 +695,7 @@ export class ChatroomApp {
         localInviteUrl: this.localInviteUrl,
         maxHumans: this.maxHumans,
         spectatorCount: this.spectatorCount,
+        arenaActive: this.arenaActive,
         apiOnline: this.apiOnline,
       })
     );
@@ -674,7 +753,9 @@ export class ChatroomApp {
       );
     }
 
-    this.tui.requestRender();
+    if (this.isStarted) {
+      this.tui.requestRender();
+    }
   }
 
   public start(): void {

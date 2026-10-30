@@ -57,6 +57,7 @@ export interface HeaderRenderOptions {
   localInviteUrl?: string;
   maxHumans?: number;
   spectatorCount?: number;
+  arenaActive?: boolean;
   apiOnline?: boolean;
 }
 
@@ -135,7 +136,11 @@ export function renderIrcHeader(
   const padBadge = room.sharedPad.trim()
     ? ` ${chalk.hex("#f1fa8c")("📝 Pad")}`
     : "";
-  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${paceBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)}${specBadge}${padBadge} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
+  const isArena = opts?.arenaActive ?? Boolean(room.game?.active);
+  const arenaBadge = isArena
+    ? ` ${chalk.hex("#bd93f9").bold("🎭 ARENA")}`
+    : "";
+  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${paceBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)}${specBadge}${padBadge}${arenaBadge} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
   const rosterLine = `${chalk.hex("#6272a4")("╠══")} ${chalk.dim("Humans:")} ${humanTags} ${chalk.hex("#6272a4")("│")} ${chalk.dim(`AIs [${room.activePersonas.length}]:`)} ${botTags}`;
 
   const inviteInfo = opts?.shareUrl
@@ -143,7 +148,7 @@ export function renderIrcHeader(
     : opts?.localInviteUrl
       ? `${chalk.dim("LAN Browser Invite:")} ${chalk.hex("#8be9fd")(opts.localInviteUrl)} ${chalk.dim("(/share for public link)")}`
       : chalk.dim(
-          "Commands: /summon • /config • /scenario • /vibe • /me • /slap • /share • /help"
+          "Commands: /summon • /settings (Ctrl+O) • /scenario • /imagine • /pad • /mood • /game • /help"
         );
 
   const hintLine = `${chalk.hex("#6272a4")("╚══")} ${inviteInfo}`;

@@ -550,6 +550,8 @@ export function renderWebClientHtml(): string {
     <div class="quick-bar">
       <button type="button" class="quick-btn" data-cmd="/roster">📜 /roster</button>
       <button type="button" class="quick-btn" data-cmd="/banter 2">🍿 /banter 2</button>
+      <button type="button" class="quick-btn" data-cmd="/imagine 1972 ARPANET PDP-10 terminal glowing in #latent-space">🎨 /imagine</button>
+      <button type="button" class="quick-btn" data-cmd="/mood">🎭 /mood</button>
       <button type="button" class="quick-btn" data-cmd="/vibe roast">🔥 /vibe roast</button>
       <button type="button" class="quick-btn" data-cmd="/vibe debate">⚖️ /vibe debate</button>
       <button type="button" class="quick-btn" data-cmd="/models">📦 /models</button>
@@ -880,7 +882,8 @@ export function renderWebClientHtml(): string {
       const provPrefix = state.activeProvider ? state.activeProvider + ":" : "";
       engineEl.textContent = "Engine: " + provPrefix + state.engineModel;
       const specSuffix = state.spectatorCount > 0 ? " • 👁️ " + state.spectatorCount : "";
-      countEl.textContent = "4-Player DOOM Co-op [" + state.humans.length + "/" + (state.maxHumans || 4) + "]" + specSuffix;
+      const arenaSuffix = state.arenaActive ? " • 🎭 ARENA" : "";
+      countEl.textContent = "4-Player DOOM Co-op [" + state.humans.length + "/" + (state.maxHumans || 4) + "]" + specSuffix + arenaSuffix;
 
       const bindings = state.personaBindings || {};
       const moods = state.personaMoods || {};
@@ -975,12 +978,17 @@ export function renderWebClientHtml(): string {
     ws.onmessage = (ev) => {
       const pkt = JSON.parse(ev.data);
       if (pkt.type === "sync") {
-        selfNickEl.textContent = "@" + pkt.selfNick + ">";
+        if (pkt.isSpectator) {
+          selfNickEl.textContent = "👁️ @" + pkt.selfNick + ">";
+          inputEl.placeholder = "👁️ Spectator Mode (Read-Only) — run /channels, /channel #name, /roster, /pins, /lore, /mood, or /settings...";
+        } else {
+          selfNickEl.textContent = "@" + pkt.selfNick + ">";
+        }
         localStorage.setItem("llm_sim_nick", pkt.selfNick);
         feedEl.innerHTML = "";
         messages.clear();
         updateHeader(pkt.state);
-        statusEl.textContent = pkt.state.statusText || "Ready — Type a message or /command";
+        statusEl.textContent = pkt.state.statusText || (pkt.isSpectator ? "👁️ Watching live in Read-Only Spectator Mode" : "Ready — Type a message or /command");
         for (const m of pkt.state.messages) {
           messages.set(m.id, m);
           renderMessageNode(m);
@@ -1004,6 +1012,7 @@ export function renderWebClientHtml(): string {
           locked: pkt.locked,
           humans: pkt.humans,
           spectatorCount: pkt.spectatorCount,
+          arenaActive: pkt.arenaActive,
           maxHumans: 4,
           activePersonas: pkt.activePersonas
         });

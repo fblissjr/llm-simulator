@@ -191,6 +191,7 @@ export interface ChannelSnapshot {
   config: SimConfig;
   lore?: string[];
   sharedPad?: string;
+  arenaActive?: boolean;
   typingUsers?: string[];
   messages: ChatMessage[];
   statusText: string;
@@ -242,7 +243,9 @@ export type ServerPacket =
       personaBindings?: Record<string, PersonaEngineBinding>;
       personaMoods?: Record<string, PersonaMoodState>;
       config?: SimConfig;
+      lore?: string[];
       sharedPad?: string;
+      arenaActive?: boolean;
       typingUsers?: string[];
       vibeKey: string;
       vibe: string;

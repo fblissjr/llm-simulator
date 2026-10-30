@@ -733,7 +733,21 @@ export const COMMANDS: CommandDefinition[] = [
           `- **Vibe**: \`${room.vibeKey.toUpperCase()}\` — ${room.vibe}`,
           `- **Simulation Preset**: \`${room.config.preset}\` (\`maxSpeakers=${room.config.maxSpeakersPerTurn}\`, \`continuationProb=${room.config.continuationProb}\`)`,
           `- **Active Engine**: \`${room.gemini.activeEngineLabel}\``,
-          `- **Active Personas**: ${room.activePersonas.map((p) => `${p.avatar} \`<${p.nick}>\` (${p.displayName})`).join(", ") || "None"}`,
+          `- **Active Personas**: ${
+            room.activePersonas
+              .map((p) => {
+                const m = room.getPersonaMood(p.id);
+                const moodSuffix = m ? ` [${m.emoji} ${m.mood}]` : "";
+                return `${p.avatar} \`<${p.nick}>\` (${p.displayName}${moodSuffix})`;
+              })
+              .join(", ") || "None"
+          }`,
+          ...(room.lore.length > 0
+            ? [
+                `- **Channel Lore (${room.lore.length})**:`,
+                ...room.lore.map((l) => `  - ${l}`),
+              ]
+            : []),
           ``,
           `---`,
           ``,
@@ -745,7 +759,15 @@ export const COMMANDS: CommandDefinition[] = [
           } else if (m.kind === "emote") {
             mdLines.push(`*\\[${m.timestamp}\\] \\* ${m.senderNick} ${m.text}*`);
           } else {
-            mdLines.push(`**[${m.timestamp}] \`<${m.senderNick}>\`**`);
+            const pinBadge = m.pinned ? " 📌 **[PINNED]**" : "";
+            const rxEntries = m.reactions ? Object.entries(m.reactions) : [];
+            const rxSuffix =
+              rxEntries.length > 0
+                ? ` _(${rxEntries.map(([e, u]) => `${e} ${u.length}`).join(", ")})_`
+                : "";
+            mdLines.push(
+              `**[${m.timestamp}] \`<${m.senderNick}>\`**${pinBadge}${rxSuffix}`
+            );
             if (m.thinking) {
               mdLines.push(`> 💭 *${m.thinking.replace(/\n/g, "\n> ")}*`);
             }
@@ -2529,13 +2551,25 @@ export class ChatroomAutocompleteProvider implements AutocompleteProvider {
 
       if (spaceIdx === -1) {
         const prefix = withoutSlash.toLowerCase();
-        const items: AutocompleteItem[] = this.slashCommands
-          .filter((c) => c.name.toLowerCase().startsWith(prefix))
-          .map((c) => ({
+        const items: AutocompleteItem[] = COMMANDS.filter(
+          (c) =>
+            c.name.toLowerCase().startsWith(prefix) ||
+            (c.aliases?.some((a) => a.toLowerCase().startsWith(prefix)) ?? false)
+        ).map((c) => {
+          const matchedAlias =
+            !c.name.toLowerCase().startsWith(prefix) &&
+            c.aliases?.find((a) => a.toLowerCase().startsWith(prefix));
+          const aliasBadge = matchedAlias
+            ? ` (alias /${matchedAlias})`
+            : c.aliases && c.aliases.length > 0
+              ? ` (${c.aliases.slice(0, 2).map((a) => `/${a}`).join(", ")})`
+              : "";
+          return {
             value: c.name,
-            label: `/${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ""}`,
+            label: `/${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ""}${aliasBadge}`,
             description: c.description,
-          }));
+          };
+        });
         return items.length > 0 ? { items, prefix: withoutSlash } : null;
       }
 

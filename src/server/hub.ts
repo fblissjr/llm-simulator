@@ -357,6 +357,7 @@ export class ChannelHub {
       config: room.config,
       lore: room.lore,
       sharedPad: room.sharedPad,
+      arenaActive: Boolean(room.game?.active),
       typingUsers: room.getTypingHumans(),
       messages: room.messages.slice(-80),
       statusText: room.statusText,
@@ -422,7 +423,9 @@ export class ChannelHub {
       personaBindings: this.gemini.getAllPersonaBindings(),
       personaMoods: room.personaMoods,
       config: room.config,
+      lore: room.lore,
       sharedPad: room.sharedPad,
+      arenaActive: Boolean(room.game?.active),
       typingUsers: room.getTypingHumans(),
       vibeKey: room.vibeKey,
       vibe: room.vibe,
@@ -565,24 +568,60 @@ export class ChannelHub {
 
     if (packet.type === "command") {
       if (ws.data.isSpectator) {
-        const cmdVerb = packet.raw.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+        const tokens = packet.raw.trim().split(/\s+/);
+        const cmdVerb = tokens[0]?.toLowerCase() ?? "";
+        const subArg = tokens[1]?.toLowerCase() ?? "";
         const allowedSpectatorCmds = new Set([
           "/channel",
           "/joinchan",
+          "/c",
+          "/switch",
           "/channels",
           "/list",
           "/roster",
           "/inspect",
           "/pins",
+          "/halloffame",
+          "/quotes",
           "/lore",
           "/relations",
+          "/mood",
+          "/moods",
           "/config",
+          "/sim",
+          "/settings",
+          "/menu",
+          "/options",
+          "/models",
           "/help",
+          "/?",
+          "/commands",
         ]);
-        if (!allowedSpectatorCmds.has(cmdVerb)) {
+        const isMutatingSub =
+          (cmdVerb === "/lore" ||
+            cmdVerb === "/relations" ||
+            cmdVerb === "/mood" ||
+            cmdVerb === "/moods" ||
+            cmdVerb === "/config" ||
+            cmdVerb === "/sim" ||
+            cmdVerb === "/settings" ||
+            cmdVerb === "/menu" ||
+            cmdVerb === "/options") &&
+          subArg.length > 0 &&
+          ![
+            "pacing",
+            "director",
+            "ambient",
+            "emergent",
+            "memory",
+            "display",
+            "all",
+          ].includes(subArg);
+
+        if (!allowedSpectatorCmds.has(cmdVerb) || isMutatingSub) {
           this.sendNotice(
             ws,
-            "👁️ Spectator Mode: You are watching in read-only mode (you can still run /channels, /channel #name, /roster, /pins, /lore, or /help)."
+            "👁️ Spectator Mode: You are watching in read-only mode (you can still run /channels, /channel #name, /roster, /pins, /lore, /mood, /settings, or /help)."
           );
           return;
         }
@@ -679,10 +718,12 @@ export class ChannelHub {
     const oldRoom = this.getOrCreateRoom(oldChan);
     ws.data.channel = cleanChan;
     this.syncChannelHumans(oldChan);
-    oldRoom.addSystemMessage(
-      `👤 @${ws.data.nick} switched to ${cleanChan}`,
-      "event"
-    );
+    if (!ws.data.isSpectator) {
+      oldRoom.addSystemMessage(
+        `👤 @${ws.data.nick} switched to ${cleanChan}`,
+        "event"
+      );
+    }
     this.broadcastPresence(oldChan);
 
     const newRoom = this.getOrCreateRoom(cleanChan);
@@ -693,11 +734,19 @@ export class ChannelHub {
       catalog: this.registry.all(),
       selfNick: ws.data.nick,
       isHost: ws.data.isHost,
+      isSpectator: ws.data.isSpectator,
     });
-    newRoom.addSystemMessage(
-      `👤 @${ws.data.nick} joined ${cleanChan}`,
-      "event"
-    );
+    if (ws.data.isSpectator) {
+      this.sendNotice(
+        ws,
+        `👁️ Switched Read-Only Spectator view to ${cleanChan}.`
+      );
+    } else {
+      newRoom.addSystemMessage(
+        `👤 @${ws.data.nick} joined ${cleanChan}`,
+        "event"
+      );
+    }
     this.broadcastPresence(cleanChan);
   }
 

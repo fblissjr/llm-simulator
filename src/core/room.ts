@@ -1137,6 +1137,8 @@ export class Room {
       masks,
       guesses: {},
     };
+    this.callbacks?.onPresenceChange?.();
+    this.notify();
 
     const maskLabels = masks.map((m) => `<${m.maskNick}>`).join(", ");
     this.addSystemMessage(
@@ -1211,6 +1213,8 @@ export class Room {
     const masks = this.game.masks;
     const guesses = this.game.guesses;
     this.game.active = false;
+    this.callbacks?.onPresenceChange?.();
+    this.notify();
 
     // Unmask messages in channel transcript so history shows who actually spoke
     for (const msg of this.messages) {
@@ -1377,14 +1381,42 @@ export class Room {
       kind: "user" | "model" | "emote" | "event";
       nick: string;
       text: string;
+      thinking?: string;
     }> = [];
+
+    let pendingMultiLine: {
+      timestamp: string;
+      kind: "user" | "model";
+      nick: string;
+      thinkingLines: string[];
+      bodyLines: string[];
+    } | null = null;
+
+    const flushPending = () => {
+      if (!pendingMultiLine) return;
+      const text = pendingMultiLine.bodyLines.join("\n").trim();
+      const thinking = pendingMultiLine.thinkingLines.join("\n").trim();
+      if (text || thinking) {
+        parsedEntries.push({
+          timestamp: pendingMultiLine.timestamp,
+          kind: pendingMultiLine.kind,
+          nick: pendingMultiLine.nick,
+          text: text || "...",
+          thinking: thinking || undefined,
+        });
+      }
+      pendingMultiLine = null;
+    };
 
     for (const rawLine of content.split(/\r?\n/)) {
       const line = rawLine.trim();
+
+      // 1. Single-line bullet format: - `[12:34]` **<Nick>**: message
       const chatMatch = line.match(
         /^-\s*`\[([^\]]+)\]`\s*\*\*<([^>]+)>\*\*(?:\s*_\([^)]*\)_)?:\s*(.+)$/
       );
       if (chatMatch) {
+        flushPending();
         const [, ts, rawNick, body] = chatMatch;
         const cleanNick = rawNick!.trim();
         const isHuman = cleanNick.startsWith("@");
@@ -1397,10 +1429,12 @@ export class Room {
         continue;
       }
 
+      // 2. Single-line bullet emote: - `[12:34]` *@nick action*
       const emoteMatch = line.match(
         /^-\s*`\[([^\]]+)\]`\s*\*(\S+)\s+(.+)\*$/
       );
       if (emoteMatch) {
+        flushPending();
         const [, ts, nick, action] = emoteMatch;
         parsedEntries.push({
           timestamp: ts!,
@@ -1408,8 +1442,76 @@ export class Room {
           nick: nick!,
           text: action!,
         });
+        continue;
+      }
+
+      // 3. Multi-line /export header: **[12:34] `<Nick>`** (optional pinned/reactions suffix)
+      const exportHeaderMatch = line.match(
+        /^\*\*\[([^\]]+)\]\s*`<([^>]+)>`\*\*(?:\s*(.*))?$/
+      );
+      if (exportHeaderMatch) {
+        flushPending();
+        const [, ts, rawNick] = exportHeaderMatch;
+        const cleanNick = rawNick!.trim();
+        const isHuman = cleanNick.startsWith("@");
+        pendingMultiLine = {
+          timestamp: ts!,
+          kind: isHuman ? "user" : "model",
+          nick: cleanNick,
+          thinkingLines: [],
+          bodyLines: [],
+        };
+        continue;
+      }
+
+      // 4. Multi-line /export emote: *\[12:34\] \* @nick action*
+      const exportEmoteMatch = line.match(
+        /^\*\\\[([^\]]+)\\\]\s*\\\*\s*(\S+)\s+(.+)\*$/
+      );
+      if (exportEmoteMatch) {
+        flushPending();
+        const [, ts, nick, action] = exportEmoteMatch;
+        parsedEntries.push({
+          timestamp: ts!,
+          kind: "emote",
+          nick: nick!,
+          text: action!.trim(),
+        });
+        continue;
+      }
+
+      // 5. Multi-line /export event/system line: *\[12:34\] \*\*\* event*
+      if (/^\*\\\[([^\]]+)\\\]\s*\\\*\\\*\\\*/.test(line)) {
+        flushPending();
+        continue;
+      }
+
+      if (pendingMultiLine) {
+        if (!line) {
+          continue;
+        }
+        if (line.startsWith("> 🎨")) {
+          if (pendingMultiLine.bodyLines.length === 0) {
+            pendingMultiLine.bodyLines.push(
+              line.replace(/^>\s*/, "").replace(/\*\*/g, "").replace(/_/g, "")
+            );
+          }
+          continue;
+        }
+        if (line.startsWith(">")) {
+          const cleanThought = line
+            .replace(/^>\s*(?:💭\s*)?/, "")
+            .replace(/^\*|\*$/g, "")
+            .trim();
+          if (cleanThought) {
+            pendingMultiLine.thinkingLines.push(cleanThought);
+          }
+          continue;
+        }
+        pendingMultiLine.bodyLines.push(rawLine);
       }
     }
+    flushPending();
 
     if (parsedEntries.length === 0) {
       throw new Error(`No replayable chat lines found in ${path.basename(targetPath)}.`);
@@ -1456,6 +1558,7 @@ export class Room {
           avatar: matchedPersona?.avatar ?? (entry.kind === "model" ? "🎬" : undefined),
           color: matchedPersona?.color ?? (entry.kind === "user" ? "#50fa7b" : "#8be9fd"),
           familyTag: "🎬 REPLAY THEATER",
+          thinking: entry.thinking,
           text: entry.text,
         };
         this.recordMessage(replayMsg, false);
@@ -1542,6 +1645,10 @@ export class Room {
         ? `\nCHANNEL LORE & EPISODIC MEMORY (running jokes & earlier events in ${this.channelName}):\n${this.lore.map((l) => `  • ${l}`).join("\n")}`
         : "";
 
+    const padSection = this.sharedPad.trim()
+      ? `\nCO-OP SHARED SCRATCHPAD (live collaborative stage notes from the humans in ${this.channelName}):\n  ${this.sharedPad.trim().replace(/\n/g, "\n  ")}`
+      : "";
+
     const activeMask = this.getArenaMask(speaker.id);
     const arenaSection = activeMask
       ? `\n🎭 BLIND TURING ARENA MODE IS ACTIVE (Topic: "${this.game!.topic}"):\n` +
@@ -1586,7 +1693,7 @@ CHATROOM CONTEXT (${this.channelName}):
 - Other AI models currently in ${this.channelName}:
 ${otherModels || "(No other AI models currently in the room)"}
 - Current Room Vibe / Scenario: ${this.vibe}
-- Stage Direction for your turn: ${directorReason}${arenaSection}${moodSection}${relationSection}${loreSection}${whisperSection}
+- Stage Direction for your turn: ${directorReason}${arenaSection}${moodSection}${relationSection}${loreSection}${padSection}${whisperSection}
 
 IMPORTANT FORMAT RULES:
 - Do NOT prefix your response with "<${speaker.nick}>:" — jump straight into your message (or optional <thinking>...</thinking> block if that fits your persona).
