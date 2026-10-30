@@ -43,6 +43,7 @@ export interface HeaderRenderOptions {
   shareUrl?: string | null;
   localInviteUrl?: string;
   maxHumans?: number;
+  spectatorCount?: number;
   apiOnline?: boolean;
 }
 
@@ -98,7 +99,11 @@ export function renderIrcHeader(
       })
       .join("  ") || chalk.dim("(none — use /summon)");
 
-  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${paceBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
+  const specBadge =
+    opts?.spectatorCount && opts.spectatorCount > 0
+      ? ` ${chalk.hex("#bd93f9")(`👁️ ${opts.spectatorCount}`)}`
+      : "";
+  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${paceBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)}${specBadge} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
   const rosterLine = `${chalk.hex("#6272a4")("╠══")} ${chalk.dim("Humans:")} ${humanTags} ${chalk.hex("#6272a4")("│")} ${chalk.dim(`AIs [${room.activePersonas.length}]:`)} ${botTags}`;
 
   const inviteInfo = opts?.shareUrl

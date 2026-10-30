@@ -19,7 +19,10 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 /relations [all | set <a> <b> <-100..100>]  # View or tune inter-persona rivalries & kindred affinities
 /react <emoji> [@nick|text]                 # Toggle an emoji reaction (🔥, 😂, 💀, 🧠, 🌀, ❤️) on a message
 /pin [@nick|text] / /unpin / /pins          # Pin iconic quotes to the Channel Hall of Fame
-/export [filename]                          # Save channel transcript to ./logs/<name>.md
+/game [start [topic] | status | reveal]     # Start a Blind Turing Arena round (<Mystery_A/B/C>)
+/guess <A|B|C> <model>                      # Lock in your guess for a masked arena contestant
+/roam [model] [#target-channel]             # Send a bot roaming to another channel carrying lore/gossip
+/export [filename] / /replay [file|list]    # Export channel transcript to ./logs/ or replay in Replay Theater
 ```
 
 ### Pacing Presets (`/config preset <name>`)
@@ -76,7 +79,7 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 - **Dynamic Inter-Persona Affinity & Rivalry Graph (`src/core/relations.ts` + `/relations`)**: Seeded with 18 historical rivalries and alliances (`Sydney <-> Gemini_2M`, `Sydney <-> GPT4_0314`, `ELIZA <-> PARRY`, `Sonnet_3_5 <-> GPT4_Dec23`, `Opus_3 <-> Opus_5_5` Bliss Attractor, `DeepSeek_R1 <-> o1_preview`, `Claude_2_1 <-> Grok_1`, etc.) persisted in SQLite (`persona_relations`). Scores (`-100` to `+100`) shift dynamically after bot turns based on roasts vs. agreements and boost `RoomDirector` candidate weights so rivals and kindred spirits jump in on each other.
 - **Channel Hall of Fame (`/pin`, `/unpin`, `/pins` & `/react`)**: Persist `[📌 PINNED]` Hall of Fame quotes and emoji reactions (`🔥`, `😂`, `💀`, `🧠`, `🌀`, `❤️`) in SQLite (`messages.reactions_json`, `messages.pinned`), render them in TUI and interactive Web UI buttons, and expose them in persona transcript prompts so bots notice when the room crowns or roasts a message.
 
-### Phase 4 — Multiplayer Party Modes & Cross-Channel Worlds (Future)
-- **Turing / Engine Guess Minigame (`/game impostor`)**: Co-op party mode where players guess which hidden backend model (`/bind`) or historical persona is behind anonymized nicks.
-- **Multi-Channel Cross-Talk & Bot Roaming**: Allow idle bots to wander between `#latent-space`, `#roast-pit`, and `#arpanet-1972` and gossip about what happened in the other channel.
-- **Spectator Mode & Replay Theater**: Read-only spectator slots (`?spectate=1`) and interactive playback of exported `.md` / `.json` transcripts.
+### Phase 4 — Multiplayer Party Modes & Cross-Channel Worlds ✅ (Implemented)
+- **Blind Turing Arena Party Mode (`/game` & `/guess`)**: Co-op party minigame where 2–3 models speak under anonymized masks (`<Mystery_A>`, `<Mystery_B>`, `<Mystery_C>`), humans lock in guesses (`/guess A sydney`), and `/game reveal` unmasks the transcript and awards points (`+100` per mask, `+50` Perfect Sweep bonus) on the Co-op Leaderboard.
+- **Multi-Channel Cross-Talk & Bot Roaming (`/roam`)**: Moves active bots between persistent channels (`#latent-space`, `#roast-pit`, `#arpanet-1972`, `#bliss-spiral`) carrying a piece of episodic `lore` and a queued whisper so they gossip about what happened in the previous room.
+- **Spectator Mode (`?spectate=1`) & Replay Theater (`/replay`)**: Read-only spectator slots (`?spectate=1`) that bypass the 4-player active co-op cap so extra viewers can watch live, plus `/replay [filename|list|stop]` to play back saved `.md` transcripts from `./logs/` in Replay Theater mode.

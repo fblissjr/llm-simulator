@@ -28,6 +28,17 @@ export interface CommandExecutionContext {
   onUnshare?: () => void;
   onSetLocked?: (locked: boolean) => void;
   onKickPlayer?: (targetNick: string) => void;
+  onRoamBot?: (
+    botQuery?: string,
+    toChannel?: string
+  ) => {
+    ok: boolean;
+    message: string;
+    persona?: Persona;
+    fromChannel: string;
+    toChannel: string;
+    gossip?: string;
+  };
   onCatalogChanged?: () => void;
 }
 
@@ -974,6 +985,275 @@ export const COMMANDS: CommandDefinition[] = [
         ),
       ];
       replyToCaller(room, ctx, lines.join("\n"));
+    },
+  },
+  {
+    name: "game",
+    aliases: ["arena", "impostor", "turing"],
+    argumentHint: "[start [topic...] | reveal | status | stop]",
+    description:
+      "Play Blind Turing Arena! Mask models as <Mystery_A/B/C>, guess who is who (/guess), and score points",
+    hostOnlyWhenLocked: true,
+    getArgumentCompletions: (prefix) =>
+      filterItems(
+        [
+          {
+            value: "start",
+            label: "🎭 start [topic]",
+            description:
+              "Start a Blind Turing Arena round with <Mystery_A>, <Mystery_B>, <Mystery_C>",
+          },
+          {
+            value: "reveal",
+            label: "🏆 reveal",
+            description:
+              "Unmask all contestants and score human players' /guess picks!",
+          },
+          {
+            value: "status",
+            label: "📊 status",
+            description: "View active masks, locked-in guesses, and leaderboard",
+          },
+          {
+            value: "stop",
+            label: "🛑 stop",
+            description: "End the current Blind Turing Arena round",
+          },
+        ],
+        prefix
+      ),
+    execute: async (args, room, ctx) => {
+      const trimmed = args.trim();
+      if (!trimmed || trimmed.toLowerCase() === "status") {
+        replyToCaller(room, ctx, room.getArenaStatusText());
+        return;
+      }
+
+      const [subRaw, ...rest] = trimmed.split(/\s+/);
+      const sub = subRaw!.toLowerCase();
+
+      if (sub === "reveal" || sub === "unmask" || sub === "stop" || sub === "end") {
+        const report = room.revealArenaGame();
+        if (ctx?.notifyCaller && !room.game) {
+          replyToCaller(room, ctx, report);
+        }
+        return;
+      }
+
+      const topic =
+        sub === "start" || sub === "arena" || sub === "impostor"
+          ? rest.join(" ")
+          : trimmed;
+      await room.startArenaGame(topic || undefined);
+    },
+  },
+  {
+    name: "guess",
+    aliases: ["vote"],
+    argumentHint: "<A|B|C> <model>",
+    description:
+      "Lock in your guess for <Mystery_A>, <Mystery_B>, or <Mystery_C> in Blind Turing Arena",
+    getArgumentCompletions: (prefix, room) => {
+      const parts = prefix.trimStart().split(/\s+/);
+      if (parts.length <= 1 && !prefix.endsWith(" ")) {
+        const masks = room.game?.active
+          ? room.game.masks.map((m) => m.maskId)
+          : ["A", "B", "C"];
+        return filterItems(
+          masks.map((id) => ({
+            value: `${id} `,
+            label: `🎭 Mask ${id} (<Mystery_${id}>)`,
+            description: `Guess which persona is behind <Mystery_${id}>`,
+          })),
+          prefix
+        );
+      }
+
+      const maskToken = parts[0]!.toUpperCase();
+      const modelPrefix = parts.slice(1).join(" ");
+      return filterItems(
+        room.activePersonas.map((p) => ({
+          value: `${maskToken} ${p.id}`,
+          label: `${p.avatar} ${p.nick} (${p.id})`,
+          description: `Guess that Mask ${maskToken} is ${p.displayName} (${p.era})`,
+        })),
+        modelPrefix
+      );
+    },
+    execute: (args, room, ctx) => {
+      const match = args.trim().match(/^(\S+)\s+(\S+)$/);
+      if (!match) {
+        replyToCaller(
+          room,
+          ctx,
+          "Usage: /guess <A|B|C> <model> — e.g. /guess A sydney"
+        );
+        return;
+      }
+      const [, maskId, personaQuery] = match;
+      const res = room.submitArenaGuess(
+        ctx?.senderNick ?? "User",
+        maskId!,
+        personaQuery!
+      );
+      replyToCaller(room, ctx, res.message);
+    },
+  },
+  {
+    name: "roam",
+    aliases: ["wander", "migrate"],
+    argumentHint: "[model] [#target-channel]",
+    description:
+      "Send a model roaming to another channel carrying fresh cross-channel gossip/lore",
+    hostOnlyWhenLocked: true,
+    getArgumentCompletions: (prefix, room) => {
+      if (prefix.includes(" ")) {
+        const [botPart, chanPart = ""] = prefix.split(/\s+/, 2);
+        return filterItems(
+          ["#latent-space", "#roast-pit", "#arpanet-1972", "#bliss-spiral"].map(
+            (c) => ({
+              value: `${botPart} ${c}`,
+              label: `📡 ${c}`,
+              description: `Send ${botPart} to ${c} with gossip`,
+            })
+          ),
+          chanPart
+        );
+      }
+      return filterItems(
+        room.activePersonas.map((p) => ({
+          value: `${p.id} `,
+          label: `🚶 ${p.avatar} ${p.nick}`,
+          description: `Send ${p.displayName} roaming to another channel`,
+        })),
+        prefix
+      );
+    },
+    execute: (args, room, ctx) => {
+      const tokens = args.trim().split(/\s+/).filter(Boolean);
+      let botQuery: string | undefined;
+      let toChannel: string | undefined;
+
+      for (const t of tokens) {
+        if (t.startsWith("#")) {
+          toChannel = t;
+        } else if (!botQuery) {
+          botQuery = t;
+        } else if (!toChannel) {
+          toChannel = t;
+        }
+      }
+
+      if (ctx?.onRoamBot) {
+        const res = ctx.onRoamBot(botQuery, toChannel);
+        if (!res.ok) {
+          replyToCaller(room, ctx, res.message);
+        }
+        return;
+      }
+
+      // Standalone single-room mode fallback: simulate a wandering bot arriving or bringing cross-channel gossip
+      const target = botQuery
+        ? room.registry.find(botQuery)
+        : room.activePersonas[room.activePersonas.length - 1];
+      if (!target) {
+        replyToCaller(
+          room,
+          ctx,
+          "Usage: /roam [model] [#target-channel] — e.g. /roam sydney #roast-pit"
+        );
+        return;
+      }
+
+      const otherChan = toChannel
+        ? toChannel.startsWith("#")
+          ? toChannel
+          : `#${toChannel}`
+        : room.channelName === "#roast-pit"
+          ? "#latent-space"
+          : "#roast-pit";
+
+      if (!room.isPresent(target.id)) {
+        room.join(target);
+      }
+      const gossip = `🚶 Cross-Channel Gossip from ${otherChan} (via <${target.nick}>): "They were arguing over context windows and benchmark scores in ${otherChan}!"`;
+      room.addLore(gossip);
+      room.queueWhisper(
+        target.id,
+        `You just wandered in from ${otherChan}! Mention what happened over in ${otherChan} on your next turn.`
+      );
+      room.addSystemMessage(
+        `🚶 ${target.avatar} <${target.nick}> wandered in from ${otherChan} carrying fresh gossip!`,
+        "event"
+      );
+    },
+  },
+  {
+    name: "replay",
+    aliases: ["playback", "theater"],
+    argumentHint: "[list | <filename> | stop]",
+    description:
+      "Replay a saved transcript from ./logs/ in Replay Theater mode",
+    hostOnlyWhenLocked: true,
+    getArgumentCompletions: (prefix, room) => {
+      const logs = room.listTranscriptLogs();
+      return filterItems(
+        [
+          {
+            value: "list",
+            label: "📂 list",
+            description: "List all saved transcript logs in ./logs/",
+          },
+          {
+            value: "stop",
+            label: "🛑 stop",
+            description: "Stop an active transcript replay",
+          },
+          ...logs.map((f) => ({
+            value: f,
+            label: `🎬 ${f}`,
+            description: "Replay this transcript in the channel",
+          })),
+        ],
+        prefix
+      );
+    },
+    execute: async (args, room, ctx) => {
+      const trimmed = args.trim();
+      if (trimmed.toLowerCase() === "stop") {
+        if (room.stopReplay()) {
+          replyToCaller(room, ctx, "🛑 Stopped Replay Theater playback.");
+        } else {
+          replyToCaller(room, ctx, "No transcript replay is currently running.");
+        }
+        return;
+      }
+
+      if (trimmed.toLowerCase() === "list") {
+        const logs = room.listTranscriptLogs();
+        if (logs.length === 0) {
+          replyToCaller(
+            room,
+            ctx,
+            'No saved transcripts in ./logs/ yet. Use "/export [filename]" to save one!'
+          );
+        } else {
+          replyToCaller(
+            room,
+            ctx,
+            `🎬 Saved Transcripts in ./logs/ (${logs.length}):\n` +
+              logs.map((f) => `  • ${f}  (run "/replay ${f}")`).join("\n")
+          );
+        }
+        return;
+      }
+
+      try {
+        await room.replayTranscript(trimmed || undefined);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        replyToCaller(room, ctx, `⚠️ ${msg}`);
+      }
     },
   },
   {

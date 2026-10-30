@@ -17,6 +17,25 @@ export interface PersonaRelation {
   note: string;
 }
 
+export type ArenaMaskId = "A" | "B" | "C";
+
+export interface ArenaMask {
+  maskId: ArenaMaskId;
+  maskNick: string; // e.g. "Mystery_A"
+  avatar: string;
+  color: string;
+  personaId: string;
+  personaNick: string;
+}
+
+export interface ArenaGameState {
+  active: boolean;
+  topic: string;
+  masks: ArenaMask[];
+  /** Human player nick -> { A?: personaId, B?: personaId, C?: personaId } */
+  guesses: Record<string, Partial<Record<ArenaMaskId, string>>>;
+}
+
 export type SimPresetId = "manual" | "chill" | "lively" | "banter" | "chaos" | "custom";
 
 export type DirectorMode = "hybrid" | "llm" | "heuristic";
@@ -126,6 +145,7 @@ export interface ChannelSnapshot {
   localInviteUrl: string;
   humans: HumanPlayer[];
   maxHumans: number;
+  spectatorCount?: number;
   activePersonas: Persona[];
   personaBindings?: Record<string, PersonaEngineBinding>;
   config: SimConfig;
@@ -160,6 +180,7 @@ export type ServerPacket =
       catalog: Persona[];
       selfNick: string;
       isHost: boolean;
+      isSpectator?: boolean;
     }
   | { type: "message:upsert"; channel: string; message: ChatMessage }
   | { type: "message:clear"; channel: string }
@@ -167,6 +188,7 @@ export type ServerPacket =
       type: "presence";
       channel: string;
       humans: HumanPlayer[];
+      spectatorCount?: number;
       activePersonas: Persona[];
       personaBindings?: Record<string, PersonaEngineBinding>;
       config?: SimConfig;

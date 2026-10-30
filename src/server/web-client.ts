@@ -369,6 +369,18 @@ export function renderWebClientHtml(): string {
           <button type="button" class="quick-btn" data-cmd="/pin">📌 /pin last msg</button>
         </div>
       </details>
+
+      <details class="control-drawer" name="room-drawer">
+        <summary>🎭 Party Arena, Roam &amp; Replay</summary>
+        <div class="drawer-controls">
+          <button type="button" class="quick-btn" data-cmd="/game start">🎭 Start Blind Arena</button>
+          <button type="button" class="quick-btn" data-cmd="/game status">📊 Arena Scoreboard</button>
+          <button type="button" class="quick-btn" data-cmd="/game reveal">🏆 Unmask &amp; Score</button>
+          <button type="button" class="quick-btn" data-cmd="/roam">🚶 /roam bot</button>
+          <button type="button" class="quick-btn" data-cmd="/export">💾 /export log</button>
+          <button type="button" class="quick-btn" data-cmd="/replay">🎬 /replay last log</button>
+        </div>
+      </details>
     </div>
 
     <div class="quick-bar">
@@ -392,9 +404,12 @@ export function renderWebClientHtml(): string {
   <script>
     const params = new URLSearchParams(window.location.search);
     const key = params.get("key") || "";
+    const spectate = params.get("spectate") === "1" || params.get("spectate") === "true";
     let storedNick = localStorage.getItem("llm_sim_nick");
     if (!storedNick) {
-      storedNick = (prompt("Enter your IRC nickname (4-Player DOOM Co-op Lobby):", "player" + Math.floor(Math.random()*90+10)) || "guest").trim();
+      storedNick = spectate
+        ? "spectator" + Math.floor(Math.random()*90+10)
+        : (prompt("Enter your IRC nickname (4-Player DOOM Co-op Lobby):", "player" + Math.floor(Math.random()*90+10)) || "guest").trim();
       localStorage.setItem("llm_sim_nick", storedNick);
     }
 
@@ -415,7 +430,7 @@ export function renderWebClientHtml(): string {
     let lastTypingSentAt = 0;
 
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(proto + "//" + window.location.host + "/ws?key=" + encodeURIComponent(key) + "&nick=" + encodeURIComponent(storedNick));
+    const ws = new WebSocket(proto + "//" + window.location.host + "/ws?key=" + encodeURIComponent(key) + "&nick=" + encodeURIComponent(storedNick) + (spectate ? "&spectate=1" : ""));
 
     function escapeHtml(s) {
       return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -501,7 +516,8 @@ export function renderWebClientHtml(): string {
       }
       const provPrefix = state.activeProvider ? state.activeProvider + ":" : "";
       engineEl.textContent = "Engine: " + provPrefix + state.engineModel;
-      countEl.textContent = "4-Player DOOM Co-op [" + state.humans.length + "/" + (state.maxHumans || 4) + "]";
+      const specSuffix = state.spectatorCount > 0 ? " • 👁️ " + state.spectatorCount : "";
+      countEl.textContent = "4-Player DOOM Co-op [" + state.humans.length + "/" + (state.maxHumans || 4) + "]" + specSuffix;
 
       const bindings = state.personaBindings || {};
       const humanPills = state.humans.map(h =>
@@ -583,6 +599,7 @@ export function renderWebClientHtml(): string {
           config: pkt.config,
           locked: pkt.locked,
           humans: pkt.humans,
+          spectatorCount: pkt.spectatorCount,
           maxHumans: 4,
           activePersonas: pkt.activePersonas
         });

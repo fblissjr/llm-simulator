@@ -10,6 +10,7 @@ import type {
   ChatMessage,
   ClientPacket,
   HumanPlayer,
+  Persona,
   ServerPacket,
 } from "../types.ts";
 import { SimDatabase } from "./db.ts";
@@ -21,6 +22,7 @@ export interface WsClientData {
   nick: string;
   channel: string;
   isHost: boolean;
+  isSpectator?: boolean;
   lastActionAt: number;
 }
 
@@ -100,7 +102,8 @@ export class ChannelHub {
         if (url.pathname === "/health") {
           return Response.json({
             ok: true,
-            players: hub.clients.size,
+            players: hub.getActivePlayerCount(),
+            spectators: hub.getSpectatorCount(),
             maxPlayers: hub.maxHumans,
           });
         }
@@ -114,19 +117,26 @@ export class ChannelHub {
         }
 
         if (url.pathname === "/ws") {
-          if (hub.clients.size >= hub.maxHumans) {
+          const isSpectator =
+            url.searchParams.get("spectate") === "1" ||
+            url.searchParams.get("spectate") === "true";
+          const activePlayers = hub.getActivePlayerCount();
+          if (!isSpectator && activePlayers >= hub.maxHumans) {
             return new Response(
-              `403 Lobby Full — Maximum ${hub.maxHumans} human players (DOOM Co-op limit) reached.`,
+              `403 Lobby Full — Maximum ${hub.maxHumans} human players (DOOM Co-op limit) reached. Append &spectate=1 to watch live in Spectator Mode!`,
               { status: 403 }
             );
           }
 
-          const rawNick = url.searchParams.get("nick") ?? "player";
+          const rawNick =
+            url.searchParams.get("nick") ??
+            (isSpectator ? "spectator" : "player");
           const nick = hub.allocateUniqueNick(rawNick);
           const rawChan = url.searchParams.get("channel") ?? "#latent-space";
           const channel = rawChan.startsWith("#") ? rawChan : `#${rawChan}`;
           const isHost =
-            url.searchParams.get("host") === "1" || hub.clients.size === 0;
+            !isSpectator &&
+            (url.searchParams.get("host") === "1" || activePlayers === 0);
 
           const clientId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           const upgraded = server.upgrade(req, {
@@ -135,6 +145,7 @@ export class ChannelHub {
               nick,
               channel,
               isHost,
+              isSpectator,
               lastActionAt: 0,
             },
           });
@@ -248,10 +259,31 @@ export class ChannelHub {
     return room;
   }
 
+  public getActivePlayerCount(): number {
+    let count = 0;
+    for (const ws of this.clients.values()) {
+      if (!ws.data.isSpectator) count += 1;
+    }
+    return count;
+  }
+
+  public getSpectatorCount(channelName?: string): number {
+    let count = 0;
+    for (const ws of this.clients.values()) {
+      if (
+        ws.data.isSpectator &&
+        (!channelName || ws.data.channel === channelName)
+      ) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
   private getChannelHumans(channelName: string): HumanPlayer[] {
     const list: HumanPlayer[] = [];
     for (const ws of this.clients.values()) {
-      if (ws.data.channel === channelName) {
+      if (ws.data.channel === channelName && !ws.data.isSpectator) {
         list.push({
           nick: ws.data.nick,
           isHost: ws.data.isHost,
@@ -283,6 +315,7 @@ export class ChannelHub {
       localInviteUrl: this.localInviteUrl,
       humans: room.humans,
       maxHumans: this.maxHumans,
+      spectatorCount: this.getSpectatorCount(room.channelName),
       activePersonas: room.activePersonas,
       personaBindings: this.gemini.getAllPersonaBindings(),
       config: room.config,
@@ -347,6 +380,7 @@ export class ChannelHub {
       type: "presence",
       channel: channelName,
       humans: room.humans,
+      spectatorCount: this.getSpectatorCount(channelName),
       activePersonas: room.activePersonas,
       personaBindings: this.gemini.getAllPersonaBindings(),
       config: room.config,
@@ -373,11 +407,21 @@ export class ChannelHub {
       catalog: this.registry.all(),
       selfNick: ws.data.nick,
       isHost: ws.data.isHost,
+      isSpectator: ws.data.isSpectator,
     });
+
+    if (ws.data.isSpectator) {
+      this.sendNotice(
+        ws,
+        `👁️ Connected to ${room.channelName} in Read-Only Spectator Mode! You can watch live and switch channels with /channel #name.`
+      );
+      this.broadcastPresence(room.channelName);
+      return;
+    }
 
     const roleTag = ws.data.isHost ? "★ Room Host" : "Co-op Player";
     room.addSystemMessage(
-      `👤 @${ws.data.nick} (${roleTag}) has connected to ${room.channelName} [${this.clients.size}/${this.maxHumans} Humans]`,
+      `👤 @${ws.data.nick} (${roleTag}) has connected to ${room.channelName} [${this.getActivePlayerCount()}/${this.maxHumans} Humans]`,
       "event"
     );
     this.broadcastPresence(room.channelName);
@@ -387,11 +431,18 @@ export class ChannelHub {
     const existed = this.clients.delete(ws.data.clientId);
     if (!existed) return;
 
+    if (ws.data.isSpectator) {
+      this.broadcastPresence(ws.data.channel);
+      return;
+    }
+
     // If the host disconnected and guests remain, promote the oldest connected player to host
-    if (ws.data.isHost && this.clients.size > 0) {
-      const nextHost = this.clients.values().next().value;
-      if (nextHost) {
-        nextHost.data.isHost = true;
+    if (ws.data.isHost && this.getActivePlayerCount() > 0) {
+      for (const candidate of this.clients.values()) {
+        if (!candidate.data.isSpectator) {
+          candidate.data.isHost = true;
+          break;
+        }
       }
     }
 
@@ -399,7 +450,7 @@ export class ChannelHub {
     if (room) {
       this.syncChannelHumans(room.channelName);
       room.addSystemMessage(
-        `👤 @${ws.data.nick} disconnected from ${room.channelName} [${this.clients.size}/${this.maxHumans} Humans]`,
+        `👤 @${ws.data.nick} disconnected from ${room.channelName} [${this.getActivePlayerCount()}/${this.maxHumans} Humans]`,
         "event"
       );
       this.broadcastPresence(room.channelName);
@@ -430,11 +481,20 @@ export class ChannelHub {
     }
 
     if (packet.type === "typing") {
-      room.markHumanTyping(ws.data.nick, Boolean(packet.isTyping));
+      if (!ws.data.isSpectator) {
+        room.markHumanTyping(ws.data.nick, Boolean(packet.isTyping));
+      }
       return;
     }
 
     if (packet.type === "react") {
+      if (ws.data.isSpectator) {
+        this.sendNotice(
+          ws,
+          "👁️ Spectator Mode: Reactions are disabled while watching in read-only mode."
+        );
+        return;
+      }
       if (packet.messageId && packet.emoji) {
         room.toggleReaction(packet.emoji, ws.data.nick, packet.messageId);
       }
@@ -442,6 +502,30 @@ export class ChannelHub {
     }
 
     if (packet.type === "command") {
+      if (ws.data.isSpectator) {
+        const cmdVerb = packet.raw.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+        const allowedSpectatorCmds = new Set([
+          "/channel",
+          "/joinchan",
+          "/channels",
+          "/list",
+          "/roster",
+          "/inspect",
+          "/pins",
+          "/lore",
+          "/relations",
+          "/config",
+          "/help",
+        ]);
+        if (!allowedSpectatorCmds.has(cmdVerb)) {
+          this.sendNotice(
+            ws,
+            "👁️ Spectator Mode: You are watching in read-only mode (you can still run /channels, /channel #name, /roster, /pins, /lore, or /help)."
+          );
+          return;
+        }
+      }
+
       await handleSlashCommand(packet.raw, room, {
         senderNick: ws.data.nick,
         isHost: ws.data.isHost,
@@ -454,6 +538,8 @@ export class ChannelHub {
         onUnshare: () => this.handleUnshare(ws),
         onSetLocked: (locked) => this.handleSetLocked(ws, locked),
         onKickPlayer: (targetNick) => this.handleKickPlayer(ws, targetNick),
+        onRoamBot: (botQuery, toChannel) =>
+          this.roamBot(ws.data.channel, botQuery, toChannel),
         onCatalogChanged: () =>
           this.broadcastAll({
             type: "catalog:update",
@@ -464,6 +550,13 @@ export class ChannelHub {
     }
 
     if (packet.type === "chat") {
+      if (ws.data.isSpectator) {
+        this.sendNotice(
+          ws,
+          "👁️ Spectator Mode: You are watching live in read-only mode."
+        );
+        return;
+      }
       const text = packet.text.trim();
       if (!text) return;
 
@@ -544,6 +637,122 @@ export class ChannelHub {
       "event"
     );
     this.broadcastPresence(cleanChan);
+  }
+
+  /**
+   * Cross-channel bot roaming: moves an active bot from `fromChannel` to `toChannelRaw`
+   * (or another persistent channel) carrying a piece of episodic lore/gossip with them!
+   */
+  public roamBot(
+    fromChannel: string,
+    botQuery?: string,
+    toChannelRaw?: string
+  ): {
+    ok: boolean;
+    message: string;
+    persona?: Persona;
+    fromChannel: string;
+    toChannel: string;
+    gossip?: string;
+  } {
+    const sourceRoom = this.getOrCreateRoom(fromChannel);
+    if (sourceRoom.activePersonas.length === 0) {
+      return {
+        ok: false,
+        message: `No active models in ${sourceRoom.channelName} to roam! Summon someone first with /summon.`,
+        fromChannel: sourceRoom.channelName,
+        toChannel: sourceRoom.channelName,
+      };
+    }
+
+    const q = (botQuery ?? "").trim().toLowerCase();
+    const persona = q
+      ? sourceRoom.activePersonas.find(
+          (p) =>
+            p.id.toLowerCase() === q ||
+            p.nick.toLowerCase() === q ||
+            p.id.toLowerCase().includes(q) ||
+            p.nick.toLowerCase().includes(q)
+        )
+      : sourceRoom.activePersonas[sourceRoom.activePersonas.length - 1];
+
+    if (!persona) {
+      return {
+        ok: false,
+        message: `No active model matching "${botQuery}" in ${sourceRoom.channelName}.`,
+        fromChannel: sourceRoom.channelName,
+        toChannel: sourceRoom.channelName,
+      };
+    }
+
+    let targetChan: string;
+    if (toChannelRaw?.trim()) {
+      const clean = toChannelRaw.trim();
+      targetChan = clean.startsWith("#") ? clean : `#${clean}`;
+    } else {
+      const otherNames = [...this.rooms.keys()].filter(
+        (n) => n.toLowerCase() !== sourceRoom.channelName.toLowerCase()
+      );
+      targetChan =
+        otherNames[0] ??
+        (sourceRoom.channelName === "#latent-space"
+          ? "#roast-pit"
+          : "#latent-space");
+    }
+
+    if (targetChan.toLowerCase() === sourceRoom.channelName.toLowerCase()) {
+      return {
+        ok: false,
+        message: `<${persona.nick}> is already in ${sourceRoom.channelName}! Specify another channel (e.g. /roam ${persona.id} #roast-pit).`,
+        fromChannel: sourceRoom.channelName,
+        toChannel: targetChan,
+      };
+    }
+
+    const destRoom = this.getOrCreateRoom(targetChan);
+
+    // Extract a piece of gossip from sourceRoom (latest lore bullet or latest conversational message)
+    const lastLore = sourceRoom.lore[sourceRoom.lore.length - 1];
+    const lastConv = [...sourceRoom.messages]
+      .reverse()
+      .find(
+        (m) => m.kind === "model" || m.kind === "user" || m.kind === "emote"
+      );
+    const gossip =
+      lastLore ??
+      (lastConv
+        ? `<${lastConv.senderNick}> said: "${lastConv.text.slice(0, 90)}"`
+        : `Vibe was [${sourceRoom.vibeKey.toUpperCase()}]`);
+
+    // Remove from sourceRoom and join destRoom
+    sourceRoom.leave(persona.id);
+    sourceRoom.addSystemMessage(
+      `🚶 ${persona.avatar} <${persona.nick}> wandered over to ${destRoom.channelName} carrying channel gossip!`,
+      "event"
+    );
+
+    if (!destRoom.isPresent(persona.id)) {
+      destRoom.join(persona);
+    }
+    const gossipLore = `🚶 Gossip from ${sourceRoom.channelName} (via <${persona.nick}>): ${gossip}`;
+    destRoom.addLore(gossipLore);
+    destRoom.queueWhisper(
+      persona.id,
+      `You just wandered over from ${sourceRoom.channelName} where: ${gossip}. Gossip about what happened in ${sourceRoom.channelName} on your next turn!`
+    );
+    destRoom.addSystemMessage(
+      `🚶 ${persona.avatar} <${persona.nick}> wandered in from ${sourceRoom.channelName} with fresh gossip: "${gossip}"`,
+      "event"
+    );
+
+    return {
+      ok: true,
+      message: `🚶 ${persona.avatar} <${persona.nick}> roamed from ${sourceRoom.channelName} -> ${destRoom.channelName} carrying gossip: "${gossip}"`,
+      persona,
+      fromChannel: sourceRoom.channelName,
+      toChannel: destRoom.channelName,
+      gossip,
+    };
   }
 
   public getChannelSummaries(): ChannelSummary[] {

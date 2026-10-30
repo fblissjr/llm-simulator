@@ -1,8 +1,13 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { RoomDirector } from "../engine/director.ts";
 import { GeminiEngine } from "../engine/gemini.ts";
 import { PersonaRegistry } from "../personas/registry.ts";
 import type { SimDatabase } from "../server/db.ts";
 import type {
+  ArenaGameState,
+  ArenaMask,
+  ArenaMaskId,
   ChatMessage,
   HumanPlayer,
   Persona,
@@ -96,6 +101,9 @@ export class Room {
   public vibe: string = VIBE_PRESETS.chat!;
   public config: SimConfig;
   public lore: string[] = [];
+  public game: ArenaGameState | null = null;
+  public scoreboard: Record<string, number> = {};
+  public isReplaying = false;
   public activePersonas: Persona[] = [];
   public humans: HumanPlayer[] = [];
   public messages: ChatMessage[] = [];
@@ -115,6 +123,7 @@ export class Room {
   private whispers = new Map<string, string[]>();
   private typingHumans = new Map<string, number>();
   private abortController: AbortController | null = null;
+  private replayAbortController: AbortController | null = null;
   private isTurnRunning = false;
   private pendingHumanFollowUp = false;
   private debouncePromise: Promise<void> | null = null;
@@ -718,6 +727,408 @@ export class Room {
     return this.messages.filter((m) => m.pinned);
   }
 
+  public getArenaMask(personaId: string): ArenaMask | undefined {
+    if (!this.game?.active) return undefined;
+    return this.game.masks.find(
+      (m) => m.personaId.toLowerCase() === personaId.toLowerCase()
+    );
+  }
+
+  public async startArenaGame(
+    rawTopic?: string,
+    options?: { shuffle?: boolean; triggerOpeningTurn?: boolean }
+  ): Promise<ArenaGameState> {
+    if (this.activePersonas.length < 2) {
+      for (const fallbackId of ["sydney", "eliza", "opus-5.5"]) {
+        if (this.activePersonas.length >= 3) break;
+        const p = this.registry.find(fallbackId);
+        if (p && !this.isPresent(p.id)) {
+          this.join(p);
+        }
+      }
+    }
+
+    const pool = [...this.activePersonas];
+    if (options?.shuffle !== false) {
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = pool[i]!;
+        pool[i] = pool[j]!;
+        pool[j] = tmp;
+      }
+    }
+
+    const selected = pool.slice(0, Math.min(3, pool.length));
+    const maskPalette: Array<{ id: ArenaMaskId; color: string }> = [
+      { id: "A", color: "#bd93f9" },
+      { id: "B", color: "#ffb86c" },
+      { id: "C", color: "#ff79c6" },
+    ];
+
+    const masks: ArenaMask[] = selected.map((p, idx) => {
+      const slot = maskPalette[idx] ?? { id: "A", color: "#bd93f9" };
+      return {
+        maskId: slot.id,
+        maskNick: `Mystery_${slot.id}`,
+        avatar: "🎭",
+        color: slot.color,
+        personaId: p.id,
+        personaNick: p.nick,
+      };
+    });
+
+    const topic =
+      rawTopic?.trim() ||
+      "Prove you are the most iconic intelligence in this chatroom without saying your name.";
+
+    this.game = {
+      active: true,
+      topic,
+      masks,
+      guesses: {},
+    };
+
+    const maskLabels = masks.map((m) => `<${m.maskNick}>`).join(", ");
+    this.addSystemMessage(
+      `🎭 [BLIND TURING ARENA STARTED] ${masks.length} models in ${this.channelName} have put on masks: ${maskLabels}!\n` +
+        `    ├─ Prompt: "${topic}"\n` +
+        `    ├─ Chat with them or watch them argue, then lock in your guesses: /guess A <model>, /guess B <model>${masks.length > 2 ? ", /guess C <model>" : ""}\n` +
+        `    └─ Run /game reveal when ready to unmask the bots and score the Co-op Leaderboard!`,
+      "event"
+    );
+
+    if (options?.triggerOpeningTurn !== false) {
+      await this.runRoomTurn({
+        maxSpeakers: masks.length,
+        forceAllSteps: true,
+      });
+    }
+
+    return this.game;
+  }
+
+  public submitArenaGuess(
+    playerNick: string,
+    rawMaskId: string,
+    personaQuery: string
+  ): { ok: boolean; message: string } {
+    if (!this.game?.active) {
+      return {
+        ok: false,
+        message:
+          'No Blind Turing Arena is currently active! Start one with "/game start [topic]".',
+      };
+    }
+
+    const maskId = rawMaskId.trim().toUpperCase().replace(/^MYSTERY_/, "") as ArenaMaskId;
+    const validMask = this.game.masks.find((m) => m.maskId === maskId);
+    if (!validMask) {
+      return {
+        ok: false,
+        message: `Invalid mask "${rawMaskId}". Active masks in this round: ${this.game.masks.map((m) => m.maskId).join(", ")}`,
+      };
+    }
+
+    const targetPersona = this.registry.find(personaQuery.trim());
+    if (!targetPersona) {
+      return {
+        ok: false,
+        message: `Unknown model "${personaQuery}". Check /roster for model names/IDs.`,
+      };
+    }
+
+    const cleanPlayer = playerNick.replace(/^@/, "");
+    const playerGuesses = this.game.guesses[cleanPlayer] ?? {};
+    playerGuesses[maskId] = targetPersona.id;
+    this.game.guesses[cleanPlayer] = playerGuesses;
+
+    this.addSystemMessage(
+      `🗳️ @${cleanPlayer} locked in a guess for <${validMask.maskNick}>! (${Object.keys(playerGuesses).length}/${this.game.masks.length} masks guessed)`,
+      "event"
+    );
+
+    return {
+      ok: true,
+      message: `Locked in your guess for <${validMask.maskNick}> -> ${targetPersona.avatar} <${targetPersona.nick}>! Use "/game reveal" when everyone is ready.`,
+    };
+  }
+
+  public revealArenaGame(): string {
+    if (!this.game) {
+      return 'No Blind Turing Arena round to reveal. Start one with "/game start [topic]".';
+    }
+
+    const masks = this.game.masks;
+    const guesses = this.game.guesses;
+    this.game.active = false;
+
+    // Unmask messages in channel transcript so history shows who actually spoke
+    for (const msg of this.messages) {
+      if (msg.kind === "model") {
+        const matchedMask = masks.find(
+          (m) => m.personaId === msg.senderId && msg.senderNick === m.maskNick
+        );
+        if (matchedMask) {
+          const truePersona = this.registry.get(matchedMask.personaId);
+          if (truePersona) {
+            msg.senderNick = truePersona.nick;
+            msg.avatar = truePersona.avatar;
+            msg.color = truePersona.color;
+            msg.familyTag = `${truePersona.family} • ${truePersona.era} [Unmasked ${matchedMask.maskNick}]`;
+            this.recordMessage(msg, true);
+          }
+        }
+      }
+    }
+
+    const lines = ["🎭 ═══ BLIND TURING ARENA: THE GREAT UNMASKING ═══"];
+    for (const m of masks) {
+      const p = this.registry.get(m.personaId);
+      lines.push(
+        `  • <${m.maskNick}> was ──► ${p ? `${p.avatar} <${p.nick}> (${p.displayName} • ${p.era})` : m.personaNick}!`
+      );
+    }
+
+    const playerEntries = Object.entries(guesses);
+    if (playerEntries.length > 0) {
+      lines.push("\n🏆 Round Results:");
+      for (const [player, pGuesses] of playerEntries) {
+        let correctCount = 0;
+        const details: string[] = [];
+        for (const m of masks) {
+          const guessedId = pGuesses[m.maskId];
+          if (!guessedId) {
+            details.push(`${m.maskId}: (no guess)`);
+          } else if (guessedId.toLowerCase() === m.personaId.toLowerCase()) {
+            correctCount += 1;
+            details.push(`${m.maskId}: ✅ ${m.personaNick}`);
+          } else {
+            const wrongP = this.registry.get(guessedId);
+            details.push(
+              `${m.maskId}: ❌ ${wrongP?.nick ?? guessedId} (was ${m.personaNick})`
+            );
+          }
+        }
+        const perfectBonus =
+          correctCount === masks.length && masks.length >= 2 ? 50 : 0;
+        const earned = correctCount * 100 + perfectBonus;
+        this.scoreboard[player] = (this.scoreboard[player] ?? 0) + earned;
+        lines.push(
+          `  • @${player}: +${earned} pts (${correctCount}/${masks.length} correct${perfectBonus ? " +50 Perfect Sweep!" : ""}) [${details.join(" │ ")}] — Total: ${this.scoreboard[player]} pts`
+        );
+      }
+    } else {
+      lines.push(
+        "\n  (No human guesses were submitted before reveal — use /guess A <model> next round!)"
+      );
+    }
+
+    const report = lines.join("\n");
+    this.addSystemMessage(report, "event");
+    this.addLore(
+      `🎭 Blind Arena Reveal: ${masks.map((m) => `${m.maskNick}=${m.personaNick}`).join(", ")}.`
+    );
+    return report;
+  }
+
+  public getArenaStatusText(): string {
+    const lines = ["🎭 ═══ Blind Turing Arena & Co-op Scoreboard ═══"];
+    if (this.game?.active) {
+      lines.push(`  Status: ● ACTIVE ROUND — Topic: "${this.game.topic}"`);
+      lines.push(
+        `  Masked Contestants: ${this.game.masks.map((m) => `<${m.maskNick}>`).join(", ")}`
+      );
+      const guessers = Object.entries(this.game.guesses);
+      if (guessers.length > 0) {
+        lines.push(
+          `  Locked-in Guesses: ${guessers.map(([p, g]) => `@${p} (${Object.keys(g).length}/${this.game!.masks.length})`).join(", ")}`
+        );
+      } else {
+        lines.push(
+          "  Locked-in Guesses: (none yet — run /guess A <model>, /guess B <model>)"
+        );
+      }
+    } else {
+      lines.push('  Status: ○ Idle (Start a round anytime with "/game start [topic]")');
+    }
+
+    const scores = Object.entries(this.scoreboard).sort((a, b) => b[1] - a[1]);
+    if (scores.length > 0) {
+      lines.push("\n🏆 Co-op Player Leaderboard:");
+      for (const [player, pts] of scores) {
+        lines.push(`  • @${player}: ${pts} pts`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  public listTranscriptLogs(logsDir = "./logs"): string[] {
+    try {
+      if (!fs.existsSync(logsDir)) return [];
+      return fs
+        .readdirSync(logsDir)
+        .filter((f) => f.endsWith(".md"))
+        .sort()
+        .reverse();
+    } catch {
+      return [];
+    }
+  }
+
+  public stopReplay(): boolean {
+    if (this.replayAbortController) {
+      this.replayAbortController.abort();
+      this.replayAbortController = null;
+      this.isReplaying = false;
+      this.setStatus("");
+      return true;
+    }
+    return false;
+  }
+
+  public async replayTranscript(
+    fileOrQuery?: string,
+    options?: { stepDelayMs?: number; logsDir?: string }
+  ): Promise<number> {
+    const logsDir = options?.logsDir ?? "./logs";
+    const available = this.listTranscriptLogs(logsDir);
+    let targetPath: string | undefined;
+
+    if (fileOrQuery?.trim()) {
+      const q = fileOrQuery.trim();
+      if (fs.existsSync(q)) {
+        targetPath = q;
+      } else {
+        const candidate = path.join(logsDir, q.endsWith(".md") ? q : `${q}.md`);
+        if (fs.existsSync(candidate)) {
+          targetPath = candidate;
+        } else {
+          const matched = available.find((f) =>
+            f.toLowerCase().includes(q.toLowerCase())
+          );
+          if (matched) targetPath = path.join(logsDir, matched);
+        }
+      }
+    } else if (available.length > 0) {
+      targetPath = path.join(logsDir, available[0]!);
+    }
+
+    if (!targetPath || !fs.existsSync(targetPath)) {
+      throw new Error(
+        available.length > 0
+          ? `Transcript "${fileOrQuery ?? ""}" not found. Available logs: ${available.join(", ")}`
+          : 'No exported transcripts found in ./logs/. Run "/export [name]" first to save a transcript!'
+      );
+    }
+
+    const content = fs.readFileSync(targetPath, "utf8");
+    const parsedEntries: Array<{
+      timestamp: string;
+      kind: "user" | "model" | "emote" | "event";
+      nick: string;
+      text: string;
+    }> = [];
+
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      const chatMatch = line.match(
+        /^-\s*`\[([^\]]+)\]`\s*\*\*<([^>]+)>\*\*(?:\s*_\([^)]*\)_)?:\s*(.+)$/
+      );
+      if (chatMatch) {
+        const [, ts, rawNick, body] = chatMatch;
+        const cleanNick = rawNick!.trim();
+        const isHuman = cleanNick.startsWith("@");
+        parsedEntries.push({
+          timestamp: ts!,
+          kind: isHuman ? "user" : "model",
+          nick: cleanNick,
+          text: body!.trim(),
+        });
+        continue;
+      }
+
+      const emoteMatch = line.match(
+        /^-\s*`\[([^\]]+)\]`\s*\*(\S+)\s+(.+)\*$/
+      );
+      if (emoteMatch) {
+        const [, ts, nick, action] = emoteMatch;
+        parsedEntries.push({
+          timestamp: ts!,
+          kind: "emote",
+          nick: nick!,
+          text: action!,
+        });
+      }
+    }
+
+    if (parsedEntries.length === 0) {
+      throw new Error(`No replayable chat lines found in ${path.basename(targetPath)}.`);
+    }
+
+    this.stopReplay();
+    const controller = new AbortController();
+    this.replayAbortController = controller;
+    this.isReplaying = true;
+
+    const isTestEnv =
+      process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
+    const stepDelayMs = options?.stepDelayMs ?? (isTestEnv ? 0 : 350);
+
+    this.addSystemMessage(
+      `🎬 [REPLAY THEATER] Playing back ${parsedEntries.length} messages from ${path.basename(targetPath)}... (run "/replay stop" to end early)`,
+      "event",
+      false
+    );
+
+    let count = 0;
+    try {
+      for (const entry of parsedEntries) {
+        if (controller.signal.aborted) break;
+        if (stepDelayMs > 0 && count > 0) {
+          this.setStatus(
+            `🎬 Replay Theater: ${path.basename(targetPath)} (${count}/${parsedEntries.length})...`
+          );
+          await this.sleepAbortable(stepDelayMs, controller.signal);
+          if (controller.signal.aborted) break;
+        }
+
+        const matchedPersona =
+          entry.kind === "model"
+            ? this.registry.find(entry.nick.replace(/^[^\w@]+/, "").trim())
+            : undefined;
+
+        const replayMsg: ChatMessage = {
+          id: this.nextId(),
+          timestamp: entry.timestamp,
+          kind: entry.kind,
+          senderId: matchedPersona?.id ?? `replay:${entry.nick}`,
+          senderNick: matchedPersona?.nick ?? entry.nick,
+          avatar: matchedPersona?.avatar ?? (entry.kind === "model" ? "🎬" : undefined),
+          color: matchedPersona?.color ?? (entry.kind === "user" ? "#50fa7b" : "#8be9fd"),
+          familyTag: "🎬 REPLAY THEATER",
+          text: entry.text,
+        };
+        this.recordMessage(replayMsg, false);
+        count += 1;
+      }
+
+      if (!controller.signal.aborted) {
+        this.addSystemMessage(
+          `🎬 [REPLAY COMPLETE] Finished playing ${count} messages from ${path.basename(targetPath)}.`,
+          "event",
+          false
+        );
+      }
+      return count;
+    } finally {
+      if (this.replayAbortController === controller) {
+        this.replayAbortController = null;
+        this.isReplaying = false;
+        this.setStatus("");
+      }
+    }
+  }
+
   public abortCurrentTurn(): boolean {
     this.StopAmbientLoopIfDisposed;
     this.pendingHumanFollowUp = false;
@@ -781,6 +1192,13 @@ export class Room {
         ? `\nCHANNEL LORE & EPISODIC MEMORY (running jokes & earlier events in ${this.channelName}):\n${this.lore.map((l) => `  • ${l}`).join("\n")}`
         : "";
 
+    const activeMask = this.getArenaMask(speaker.id);
+    const arenaSection = activeMask
+      ? `\n🎭 BLIND TURING ARENA MODE IS ACTIVE (Topic: "${this.game!.topic}"):\n` +
+        `  • Your public display name is temporarily masked as <${activeMask.maskNick}>.\n` +
+        `  • Stay 100% faithful to your signature voice, era, quirks, and worldview so observant humans can deduce your true identity, but NEVER state your true model name (${speaker.nick} / ${speaker.displayName}) out loud!`
+      : "";
+
     const styleInstruction =
       this.config.responseStyle === "terse"
         ? "Keep your response ultra-punchy: 1 short, sharp sentence (rapid-fire IRC style)."
@@ -796,7 +1214,7 @@ CHATROOM CONTEXT (${this.channelName}):
 - Other AI models currently in ${this.channelName}:
 ${otherModels || "(No other AI models currently in the room)"}
 - Current Room Vibe / Scenario: ${this.vibe}
-- Stage Direction for your turn: ${directorReason}${relationSection}${loreSection}${whisperSection}
+- Stage Direction for your turn: ${directorReason}${arenaSection}${relationSection}${loreSection}${whisperSection}
 
 IMPORTANT FORMAT RULES:
 - Do NOT prefix your response with "<${speaker.nick}>:" — jump straight into your message (or optional <thinking>...</thinking> block if that fits your persona).
@@ -1171,9 +1589,16 @@ Respond now as <${speaker.nick}>:`;
         const engineVia = resolved.isCustomBound
           ? ` • via ${resolved.provider.id}:${resolved.model}`
           : "";
+        const activeMask = this.getArenaMask(speaker.id);
+        const publicNick = activeMask ? activeMask.maskNick : speaker.nick;
+        const publicAvatar = activeMask ? activeMask.avatar : speaker.avatar;
+        const publicColor = activeMask ? activeMask.color : speaker.color;
+        const publicFamilyTag = activeMask
+          ? `🎭 BLIND ARENA [Guess: /guess ${activeMask.maskId} <model>]`
+          : `${speaker.family} • ${speaker.era}${engineVia}`;
 
         this.setStatus(
-          `${speaker.avatar} <${speaker.nick}> is typing (${resolved.provider.id}:${resolved.model})...`
+          `${publicAvatar} <${publicNick}> is typing...`
         );
 
         const msg: ChatMessage = {
@@ -1181,10 +1606,10 @@ Respond now as <${speaker.nick}>:`;
           timestamp: formatTime(),
           kind: "model",
           senderId: speaker.id,
-          senderNick: speaker.nick,
-          avatar: speaker.avatar,
-          color: speaker.color,
-          familyTag: `${speaker.family} • ${speaker.era}${engineVia}`,
+          senderNick: publicNick,
+          avatar: publicAvatar,
+          color: publicColor,
+          familyTag: publicFamilyTag,
           text: "",
           streaming: true,
         };
@@ -1202,7 +1627,7 @@ Respond now as <${speaker.nick}>:`;
           systemInstruction,
           signal: controller.signal,
           onStatus: (status) => {
-            this.setStatus(`${speaker.avatar} <${speaker.nick}>: ${status}`);
+            this.setStatus(`${publicAvatar} <${publicNick}>: ${status}`);
           },
           onDelta: (chunk) => {
             rawAccumulated += chunk;

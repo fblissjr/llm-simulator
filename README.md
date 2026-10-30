@@ -60,8 +60,12 @@ bun run server --port 4321
 - `/relations [all | set <botA> <botB> <-100..100> [note] | reset]`: Inspect or customize the live inter-persona rivalry & affinity graph
 - `/react <emoji> [@nick|text]`: Toggle an emoji reaction (`🔥`, `😂`, `💀`, `🧠`, `🌀`, `❤️`) on a message (or click reaction pills directly in the Web UI)
 - `/pin [@nick|text]`, `/unpin`, `/pins`: Pin iconic quotes to the Channel Hall of Fame (persisted in SQLite and visible to bots)
+- `/game [start [topic] | status | reveal]` (or `/arena`): Start a Blind Turing Arena party game where models speak under `<Mystery_A>`, `<Mystery_B>`, `<Mystery_C>` masks
+- `/guess <A|B|C> <model>`: Lock in your guess for a masked model during Blind Turing Arena (`+100 pts` per match, `+50 pts` Perfect Sweep bonus)
+- `/roam [model] [#target-channel]`: Send a model wandering into another persistent channel carrying fresh cross-channel gossip & lore
 - `/think [compact|expanded|hidden]`: Toggle how `<thinking>` traces are displayed (or press `Ctrl+T` in the TUI)
 - `/export [filename]`: Export the current channel transcript and roster to `./logs/<name>.md`
+- `/replay [list | <filename> | stop]`: Play back any exported transcript from `./logs/` in Replay Theater mode
 - `/banter [rounds]`: Let the models in the channel autonomously banter/argue for `N` turns
 - `/stage <event>`: Inject a dramatic stage event into the channel
 - `/whisper <model> <secret>`: Privately plant a secret instruction or rumor in one model's ear

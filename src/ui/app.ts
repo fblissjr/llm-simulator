@@ -41,6 +41,7 @@ export class ChatroomApp {
   private shareUrl: string | null = null;
   private localInviteUrl?: string;
   private maxHumans = 4;
+  private spectatorCount = 0;
   private apiOnline?: boolean;
   private typingUsers: string[] = [];
   private lastTypingSentAt = 0;
@@ -228,6 +229,7 @@ export class ChatroomApp {
       this.shareUrl = s.shareUrl;
       this.localInviteUrl = s.localInviteUrl;
       this.maxHumans = s.maxHumans;
+      this.spectatorCount = s.spectatorCount ?? 0;
       this.room.humans = s.humans;
       this.room.activePersonas = s.activePersonas;
       this.room.messages = s.messages;
@@ -243,6 +245,7 @@ export class ChatroomApp {
         }
       }
       this.room.humans = packet.humans;
+      this.spectatorCount = packet.spectatorCount ?? 0;
       this.room.activePersonas = packet.activePersonas;
       this.room.vibeKey = packet.vibeKey;
       this.room.vibe = packet.vibe;
@@ -428,6 +431,7 @@ export class ChatroomApp {
         shareUrl: this.shareUrl,
         localInviteUrl: this.localInviteUrl,
         maxHumans: this.maxHumans,
+        spectatorCount: this.spectatorCount,
         apiOnline: this.apiOnline,
       })
     );
