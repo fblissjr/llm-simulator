@@ -358,6 +358,7 @@ export class ChannelHub {
       lore: room.lore,
       sharedPad: room.sharedPad,
       arenaActive: Boolean(room.game?.active),
+      scenarios: this.registry.allScenarios(),
       typingUsers: room.getTypingHumans(),
       messages: room.messages.slice(-80),
       statusText: room.statusText,
@@ -447,6 +448,7 @@ export class ChannelHub {
       type: "sync",
       state: this.buildChannelSnapshot(room),
       catalog: this.registry.all(),
+      scenarios: this.registry.allScenarios(),
       selfNick: ws.data.nick,
       isHost: ws.data.isHost,
       isSpectator: ws.data.isSpectator,
@@ -592,6 +594,11 @@ export class ChannelHub {
           "/settings",
           "/menu",
           "/options",
+          "/forge",
+          "/persona",
+          "/craft",
+          "/scenario",
+          "/make-scenario",
           "/models",
           "/help",
           "/?",
@@ -606,7 +613,12 @@ export class ChannelHub {
             cmdVerb === "/sim" ||
             cmdVerb === "/settings" ||
             cmdVerb === "/menu" ||
-            cmdVerb === "/options") &&
+            cmdVerb === "/options" ||
+            cmdVerb === "/forge" ||
+            cmdVerb === "/persona" ||
+            cmdVerb === "/craft" ||
+            cmdVerb === "/scenario" ||
+            cmdVerb === "/make-scenario") &&
           subArg.length > 0 &&
           ![
             "pacing",
@@ -616,12 +628,13 @@ export class ChannelHub {
             "memory",
             "display",
             "all",
+            "list",
           ].includes(subArg);
 
         if (!allowedSpectatorCmds.has(cmdVerb) || isMutatingSub) {
           this.sendNotice(
             ws,
-            "👁️ Spectator Mode: You are watching in read-only mode (you can still run /channels, /channel #name, /roster, /pins, /lore, /mood, /settings, or /help)."
+            "👁️ Spectator Mode: You are watching in read-only mode (you can still run /channels, /channel #name, /roster, /pins, /lore, /mood, /settings, /forge, or /help)."
           );
           return;
         }
@@ -641,11 +654,18 @@ export class ChannelHub {
         onKickPlayer: (targetNick) => this.handleKickPlayer(ws, targetNick),
         onRoamBot: (botQuery, toChannel) =>
           this.roamBot(ws.data.channel, botQuery, toChannel),
-        onCatalogChanged: () =>
+        onCatalogChanged: () => {
+          for (const r of this.rooms.values()) {
+            for (const p of this.registry.all()) {
+              r.refreshActivePersona(p);
+            }
+          }
           this.broadcastAll({
             type: "catalog:update",
             catalog: this.registry.all(),
-          }),
+            scenarios: this.registry.allScenarios(),
+          });
+        },
       });
       return;
     }
@@ -732,6 +752,7 @@ export class ChannelHub {
       type: "sync",
       state: this.buildChannelSnapshot(newRoom),
       catalog: this.registry.all(),
+      scenarios: this.registry.allScenarios(),
       selfNick: ws.data.nick,
       isHost: ws.data.isHost,
       isSpectator: ws.data.isSpectator,

@@ -148,7 +148,7 @@ export function renderIrcHeader(
     : opts?.localInviteUrl
       ? `${chalk.dim("LAN Browser Invite:")} ${chalk.hex("#8be9fd")(opts.localInviteUrl)} ${chalk.dim("(/share for public link)")}`
       : chalk.dim(
-          "Commands: /summon • /settings (Ctrl+O) • /scenario • /imagine • /pad • /mood • /game • /help"
+          "Commands: /summon • /forge (Ctrl+F) • /settings (Ctrl+O) • /scenario • /imagine • /pad • /mood • /game • /help"
         );
 
   const hintLine = `${chalk.hex("#6272a4")("╚══")} ${inviteInfo}`;

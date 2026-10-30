@@ -172,6 +172,18 @@ export interface HumanPlayer {
   activity?: HumanActivity;
 }
 
+export interface CuratedScenario {
+  id: string;
+  title: string;
+  description: string;
+  personas: string[];
+  vibeKey: string;
+  vibe?: string;
+  preset: Exclude<SimPresetId, "custom">;
+  openingStageEvent: string;
+  isCustom?: boolean;
+}
+
 export interface ChannelSnapshot {
   channelName: string;
   vibeKey: string;
@@ -192,6 +204,7 @@ export interface ChannelSnapshot {
   lore?: string[];
   sharedPad?: string;
   arenaActive?: boolean;
+  scenarios?: CuratedScenario[];
   typingUsers?: string[];
   messages: ChatMessage[];
   statusText: string;
@@ -222,6 +235,7 @@ export type ServerPacket =
       type: "sync";
       state: ChannelSnapshot;
       catalog: Persona[];
+      scenarios?: CuratedScenario[];
       selfNick: string;
       isHost: boolean;
       isSpectator?: boolean;
@@ -257,7 +271,11 @@ export type ServerPacket =
       localInviteUrl: string;
     }
   | { type: "status"; channel: string; statusText: string }
-  | { type: "catalog:update"; catalog: Persona[] }
+  | {
+      type: "catalog:update";
+      catalog: Persona[];
+      scenarios?: CuratedScenario[];
+    }
   | { type: "nick:ack"; nick: string }
   | { type: "notice"; message: ChatMessage }
   | { type: "kicked"; reason: string };

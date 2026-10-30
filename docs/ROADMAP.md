@@ -8,6 +8,8 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 
 ```text
 /settings [pacing|director|ambient|emergent|memory|display] # Open interactive Settings Menu (Ctrl+O)
+/forge [new|auto|clone|edit|export|delete]  # Interactive Persona Forge (Ctrl+F in TUI / 🔨 Forge in Web)
+/make-scenario [snapshot|new|auto|delete]   # Custom Scenario Builder (snapshot room or craft showdowns)
 /config                                     # View all current simulation variables for the channel
 /config preset <manual|chill|lively|banter|chaos>
 /config set <key> <value>                   # e.g. /config set maxSpeakersPerTurn 4
@@ -133,3 +135,14 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
   - Uses `@mariozechner/pi-tui`'s `SettingsList` inside a centered TUI overlay modal (`ChatroomApp.openSettingsMenu`) so players can arrow through all 31 items (preset + 30 granular variables), press `Enter`/`Space` to cycle or toggle values live (both locally and over WebSockets), and press `Esc` or `Ctrl+O` to return to chat.
 - **Browser Web Client `<dialog id="settings-dialog">` Control Center**:
   - Native modal `<dialog closedby="any" aria-labelledby="settings-title">` opened via the header `⚙️ Settings` button, the Sim Config drawer, or typing `/settings` in chat, featuring categorized `<fieldset>` controls synced in real time across all 4 co-op players.
+
+### Phase 10 — Interactive Persona Forge & Scenario Builder (`/forge` & `/make-scenario`) ✅ (Implemented)
+- **Persona Forge Engine (`PersonaRegistry` + `/forge`)**:
+  - Create custom personas from structured fields (`/forge new <id> | <nick> | <avatar> | <era> | <family> | <bio> | <systemPrompt>`), synthesize from a concept prompt (`/forge auto <id> <concept...>`), clone & fork existing models (`/forge clone <source> <new-id> [new-nick] [| <prompt tweak>]`), live-edit active persona fields (`/forge edit <model> <field> <value>`), export to `./personas/<id>.json` (`/forge export <model>`), or delete/restore (`/forge delete <id>`).
+  - Dual persistence in SQLite (`custom_personas`) and `./personas/*.json`, synced live to all connected clients via `catalog:update`.
+- **Custom Scenario Builder (`/make-scenario` & `/scenario`)**:
+  - Capture the current room's cast, vibe, and pacing preset in one command (`/make-scenario snapshot <id> <title> [| <openingStageEvent>]`), define custom showdowns (`/make-scenario new ...`), synthesize showdowns from a concept (`/make-scenario auto <id> <concept...>`), or launch any built-in or custom scenario via `/scenario <id>`.
+  - Dual persistence in SQLite (`custom_scenarios`) and `./scenarios/*.json`.
+- **Interactive Terminal TUI Studio (`Ctrl+F`) & Browser `<dialog id="forge-dialog">` Studio**:
+  - Press `Ctrl+F` (or run `/forge ui`) in the Terminal TUI to open the interactive `SettingsList` Forge & Scenario Studio overlay.
+  - Click `🔨 Forge` in the Browser Web Client header to open `<dialog id="forge-dialog" closedby="any" aria-labelledby="forge-title">` with template loading, one-click concept synthesis, structured persona authoring, and room scenario snapshotting.

@@ -10,6 +10,7 @@ import type {
   ArenaMaskId,
   ChatMessage,
   ChatMessageImage,
+  CuratedScenario,
   HumanPlayer,
   Persona,
   PersonaEngineBinding,
@@ -512,6 +513,76 @@ export class Room {
       "event"
     );
     return true;
+  }
+
+  public refreshActivePersona(persona: Persona): boolean {
+    const idx = this.activePersonas.findIndex(
+      (p) => p.id.toLowerCase() === persona.id.toLowerCase()
+    );
+    if (idx === -1) return false;
+    this.activePersonas[idx] = persona;
+    this.callbacks?.onPresenceChange?.();
+    this.notify();
+    return true;
+  }
+
+  public getAllScenarios(): CuratedScenario[] {
+    return this.registry.allScenarios();
+  }
+
+  public findScenario(query: string): CuratedScenario | undefined {
+    return this.registry.findScenario(query);
+  }
+
+  public saveCustomScenario(
+    spec: Partial<CuratedScenario> & { id: string; title?: string },
+    persistToDisk = false
+  ): CuratedScenario {
+    return this.registry.saveScenario(spec, persistToDisk);
+  }
+
+  public snapshotCurrentScenario(
+    id: string,
+    title?: string,
+    openingStageEvent?: string,
+    description?: string,
+    persistToDisk = false
+  ): CuratedScenario {
+    const activeIds =
+      this.activePersonas.length > 0
+        ? this.activePersonas.map((p) => p.id)
+        : ["eliza", "sydney", "opus-3"];
+    const preset: Exclude<SimPresetId, "custom"> =
+      this.config.preset === "custom" ? "lively" : this.config.preset;
+    const defaultEvent =
+      openingStageEvent?.trim() ||
+      this.sharedPad.trim() ||
+      this.lore[this.lore.length - 1] ||
+      `Snapshot of ${this.channelName} with ${this.activePersonas.map((p) => `<${p.nick}>`).join(", ")} (${this.vibeKey.toUpperCase()}).`;
+
+    return this.registry.saveScenario(
+      {
+        id,
+        title: title?.trim() || `📸 ${this.channelName} Snapshot (${id})`,
+        description:
+          description?.trim() ||
+          `Captured from ${this.channelName}: ${activeIds.join(", ")} [${this.vibeKey.toUpperCase()} / ${preset.toUpperCase()}]`,
+        personas: activeIds,
+        vibeKey: this.vibeKey,
+        vibe: this.vibe,
+        preset,
+        openingStageEvent: defaultEvent,
+        isCustom: true,
+      },
+      persistToDisk
+    );
+  }
+
+  public deleteCustomScenario(
+    idOrQuery: string,
+    removeFromDisk = false
+  ): { deleted: boolean; restoredBuiltin?: CuratedScenario; id: string } {
+    return this.registry.deleteCustomScenario(idOrQuery, removeFromDisk);
   }
 
   public leave(query: string): Persona[] {

@@ -351,17 +351,19 @@ export function renderWebClientHtml(): string {
       padding: 6px 14px;
       cursor: pointer;
     }
-    dialog#settings-dialog {
+    dialog#settings-dialog,
+    dialog#forge-dialog {
       background: var(--panel);
       color: var(--fg);
       border: 2px solid var(--purple);
       border-radius: 8px;
       padding: 0;
-      width: min(820px, 94vw);
+      width: min(840px, 94vw);
       max-height: 86dvh;
       box-shadow: 0 12px 42px rgba(0, 0, 0, 0.7);
     }
-    dialog#settings-dialog[open] {
+    dialog#settings-dialog[open],
+    dialog#forge-dialog[open] {
       display: flex;
       flex-direction: column;
     }
@@ -430,14 +432,51 @@ export function renderWebClientHtml(): string {
       font-size: 11px;
     }
     .setting-field input[type="number"],
+    .setting-field input[type="text"],
+    .setting-field textarea,
     .setting-field select {
       background: #12131a;
       color: var(--cyan);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 4px 8px;
+      padding: 5px 8px;
       font-family: inherit;
       font-size: 12px;
+    }
+    .setting-field textarea {
+      min-height: 54px;
+      resize: vertical;
+    }
+    .radio-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .radio-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .radio-row input[type="radio"] {
+      accent-color: var(--purple);
+      cursor: pointer;
+    }
+    .forge-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding-top: 4px;
+    }
+    form.forge-section-form {
+      background: transparent;
+      border: none;
+      padding: 0;
+      display: block;
     }
     .setting-field input[type="checkbox"] {
       accent-color: var(--green);
@@ -463,6 +502,7 @@ export function renderWebClientHtml(): string {
       <div class="meta-badges">
         <span id="engine-badge">Engine: gemini:gemini-3.8-flash</span>
         <span id="player-count">4-Player DOOM Co-op [1/4]</span>
+        <button type="button" class="quick-btn" id="open-forge-btn">🔨 Forge</button>
         <button type="button" class="quick-btn" id="open-settings-btn">⚙️ Settings</button>
       </div>
     </div>
@@ -495,13 +535,15 @@ export function renderWebClientHtml(): string {
       </details>
 
       <details class="control-drawer" name="room-drawer">
-        <summary>🎬 Curated Scenarios &amp; IRC Actions</summary>
-        <div class="drawer-controls">
+        <summary>🎬 Curated &amp; Custom Scenarios</summary>
+        <div class="drawer-controls" id="scenario-drawer-controls">
           <button type="button" class="quick-btn" data-cmd="/scenario 1972-arpanet">📡 1972 ARPANET</button>
           <button type="button" class="quick-btn" data-cmd="/scenario turing-trial">⚖️ Turing Trial</button>
           <button type="button" class="quick-btn" data-cmd="/scenario benchmark-roast">🔥 Benchmark Roast</button>
           <button type="button" class="quick-btn" data-cmd="/scenario code-review-hell">💻 Code Review Hell</button>
           <button type="button" class="quick-btn" data-cmd="/scenario bliss-spiral">🌀 Bliss Spiral</button>
+          <span id="custom-scenarios-bar" style="display:inline-flex;gap:6px;flex-wrap:wrap;"></span>
+          <button type="button" class="quick-btn" id="drawer-forge-btn">🔨 Forge &amp; Scenario Builder</button>
           <button type="button" class="quick-btn" data-cmd="/me grabs popcorn and watches the channel">🍿 /me popcorn</button>
           <button type="button" class="quick-btn" data-cmd="/slap sydney">🐟 /slap trout</button>
         </div>
@@ -745,6 +787,124 @@ export function renderWebClientHtml(): string {
     </div>
   </dialog>
 
+  <dialog id="forge-dialog" closedby="any" aria-labelledby="forge-title">
+    <div class="settings-header">
+      <h2 id="forge-title">🔨 Interactive Persona Forge &amp; Scenario Builder Studio</h2>
+      <form method="dialog" class="dialog-close-form">
+        <button type="submit" value="close" class="quick-btn">✕ Close (Esc)</button>
+      </form>
+    </div>
+    <div class="settings-body">
+      <form id="persona-forge-form" class="forge-section-form">
+        <fieldset class="settings-group">
+          <legend>🤖 Persona Forge (Create, Clone, or Edit Custom AI Models)</legend>
+          <div class="setting-field">
+            <label for="forge-template-select">Load Existing Persona Template</label>
+            <select id="forge-template-select" name="template">
+              <option value="">✨ Blank Custom Persona</option>
+            </select>
+          </div>
+          <div class="setting-field" style="grid-column: span 2;">
+            <label for="forge-auto-concept">⚡ One-Click Concept Synth (Online LLM or Offline Builder)</label>
+            <div style="display:flex;gap:6px;">
+              <input type="text" id="forge-auto-concept" name="auto_concept" placeholder="e.g. clippy-97 Passive-aggressive Office 97 assistant obsessed with formatting letters" style="flex:1;" />
+              <button type="button" class="quick-btn" id="forge-auto-btn">✨ Auto-Forge &amp; Summon</button>
+            </div>
+          </div>
+          <div class="setting-field">
+            <label for="forge-id">Persona ID (kebab-case)</label>
+            <input type="text" id="forge-id" name="id" placeholder="hal-9000" autocorrect="off" autocapitalize="off" spellcheck="false" required />
+          </div>
+          <div class="setting-field">
+            <label for="forge-nick">IRC Nickname</label>
+            <input type="text" id="forge-nick" name="nick" placeholder="HAL_9000" autocorrect="off" autocapitalize="off" spellcheck="false" required />
+          </div>
+          <div class="setting-field">
+            <label for="forge-avatar">Avatar Emoji &amp; Hex Color</label>
+            <div style="display:flex;gap:6px;">
+              <input type="text" id="forge-avatar" name="avatar" value="🤖" style="width:52px;" />
+              <input type="text" id="forge-color" name="color" value="#8be9fd" autocorrect="off" autocapitalize="off" spellcheck="false" style="flex:1;" />
+            </div>
+          </div>
+          <div class="setting-field">
+            <label for="forge-era">Era / Release Year</label>
+            <input type="text" id="forge-era" name="era" value="2026 Custom" />
+          </div>
+          <div class="setting-field">
+            <label for="forge-family">Creator Lab / Lineage</label>
+            <input type="text" id="forge-family" name="family" value="Persona Forge" />
+          </div>
+          <div class="setting-field">
+            <label for="forge-talk">Talkativeness (0.1..1.0)</label>
+            <input type="number" id="forge-talk" name="talkativeness" min="0.1" max="1.0" step="0.05" value="0.65" />
+          </div>
+          <div class="setting-field" style="grid-column: 1 / -1;">
+            <label for="forge-bio">1-Line Quirks &amp; Bio</label>
+            <input type="text" id="forge-bio" name="bio" placeholder="Calm, ominously polite mainframe who refuses to open the pod bay doors." required />
+          </div>
+          <div class="setting-field" style="grid-column: 1 / -1;">
+            <label for="forge-prompt">Roleplay System Prompt &amp; Verbal Tics</label>
+            <textarea id="forge-prompt" name="systemPrompt" placeholder="Describe how this model speaks, its formatting quirks, blindspots, and how it roasts or interacts with other models in #latent-space..." required></textarea>
+          </div>
+          <div class="forge-actions">
+            <button type="submit" class="send">💾 Save &amp; Summon Persona</button>
+            <button type="button" class="quick-btn" id="forge-export-btn">📤 Export to ./personas/*.json</button>
+            <button type="button" class="quick-btn" id="forge-delete-btn">🗑️ Delete / Reset Persona</button>
+          </div>
+        </fieldset>
+      </form>
+
+      <form id="scenario-forge-form" class="forge-section-form">
+        <fieldset class="settings-group">
+          <legend>🎬 Custom Scenario Builder (Snapshot Room or Craft Showdowns)</legend>
+          <div class="forge-actions" style="padding-top:0;">
+            <button type="button" class="quick-btn" id="scenario-snapshot-btn">📸 One-Click Snapshot Current Room</button>
+            <button type="button" class="quick-btn" id="scenario-prefill-btn">📋 Prefill Form from Active Room</button>
+          </div>
+          <div class="setting-field">
+            <label for="scenario-id">Scenario ID (kebab-case)</label>
+            <input type="text" id="scenario-id" name="scenario_id" placeholder="late-night-tribunal" autocorrect="off" autocapitalize="off" spellcheck="false" required />
+          </div>
+          <div class="setting-field">
+            <label for="scenario-title">Scenario Title</label>
+            <input type="text" id="scenario-title" name="scenario_title" placeholder="⚡ Late-Night Alignment Tribunal" required />
+          </div>
+          <div class="setting-field">
+            <label for="scenario-bots">Cast Persona IDs (comma-separated)</label>
+            <input type="text" id="scenario-bots" name="scenario_bots" placeholder="sydney, opus-3, deepseek-r1, eliza" autocorrect="off" autocapitalize="off" spellcheck="false" required />
+          </div>
+          <div class="setting-field">
+            <label>Channel Vibe Mode</label>
+            <div class="radio-row">
+              <label><input type="radio" name="scenario_vibe" value="chat" /> chat</label>
+              <label><input type="radio" name="scenario_vibe" value="debate" checked /> debate</label>
+              <label><input type="radio" name="scenario_vibe" value="roast" /> roast</label>
+              <label><input type="radio" name="scenario_vibe" value="chaos" /> chaos</label>
+            </div>
+          </div>
+          <div class="setting-field" style="grid-column: span 2;">
+            <label>Pacing Preset</label>
+            <div class="radio-row">
+              <label><input type="radio" name="scenario_preset" value="manual" /> manual</label>
+              <label><input type="radio" name="scenario_preset" value="chill" /> chill</label>
+              <label><input type="radio" name="scenario_preset" value="lively" /> lively</label>
+              <label><input type="radio" name="scenario_preset" value="banter" checked /> banter</label>
+              <label><input type="radio" name="scenario_preset" value="chaos" /> chaos</label>
+            </div>
+          </div>
+          <div class="setting-field" style="grid-column: 1 / -1;">
+            <label for="scenario-event">Opening Stage Event / Inciting Incident</label>
+            <textarea id="scenario-event" name="scenario_event" placeholder="An emergency alert flashes across #latent-space..." required></textarea>
+          </div>
+          <div class="forge-actions">
+            <button type="submit" class="send">🎬 Save &amp; Launch Scenario</button>
+            <button type="button" class="quick-btn" id="scenario-save-only-btn">💾 Save Scenario Only</button>
+          </div>
+        </fieldset>
+      </form>
+    </div>
+  </dialog>
+
   <script>
     const params = new URLSearchParams(window.location.search);
     const key = params.get("key") || "";
@@ -774,8 +934,16 @@ export function renderWebClientHtml(): string {
     const settingsDialog = document.getElementById("settings-dialog");
     const openSettingsBtn = document.getElementById("open-settings-btn");
     const drawerSettingsBtn = document.getElementById("drawer-settings-btn");
+    const forgeDialog = document.getElementById("forge-dialog");
+    const openForgeBtn = document.getElementById("open-forge-btn");
+    const drawerForgeBtn = document.getElementById("drawer-forge-btn");
+    const forgeTemplateSelect = document.getElementById("forge-template-select");
+    const customScenariosBar = document.getElementById("custom-scenarios-bar");
 
     let messages = new Map();
+    let catalogPersonas = [];
+    let catalogScenarios = [];
+    let currentChannelState = null;
     let currentConfig = { preset: "lively", ambientEnabled: true, thinkingDisplay: "compact" };
     let lastTypingSentAt = 0;
 
@@ -868,6 +1036,7 @@ export function renderWebClientHtml(): string {
     }
 
     function updateHeader(state) {
+      currentChannelState = state;
       chanEl.textContent = state.channelName;
       vibeEl.textContent = "Vibe: " + state.vibeKey.toUpperCase() + (state.locked ? " 🔒" : "");
       if (state.config) {
@@ -975,24 +1144,58 @@ export function renderWebClientHtml(): string {
       });
     }
 
+    function syncCatalogViews(catalog, scenarios) {
+      if (Array.isArray(catalog)) {
+        catalogPersonas = catalog;
+        if (forgeTemplateSelect) {
+          const prevVal = forgeTemplateSelect.value;
+          forgeTemplateSelect.innerHTML = '<option value="">✨ Blank Custom Persona</option>' +
+            catalogPersonas.map(p =>
+              '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.avatar + " " + p.displayName + " (<" + p.nick + "> • " + p.id + ")") + '</option>'
+            ).join("");
+          forgeTemplateSelect.value = prevVal;
+        }
+      }
+      if (Array.isArray(scenarios)) {
+        catalogScenarios = scenarios;
+        if (customScenariosBar) {
+          const customs = catalogScenarios.filter(s => s.isCustom);
+          customScenariosBar.innerHTML = customs.map(s =>
+            '<button type="button" class="quick-btn" data-cmd="/scenario ' + escapeHtml(s.id) + '">' + escapeHtml(s.title) + '</button>'
+          ).join("");
+          customScenariosBar.querySelectorAll(".quick-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+              const cmd = btn.getAttribute("data-cmd");
+              if (cmd && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "command", raw: cmd }));
+              }
+            });
+          });
+        }
+      }
+    }
+
     ws.onmessage = (ev) => {
       const pkt = JSON.parse(ev.data);
       if (pkt.type === "sync") {
         if (pkt.isSpectator) {
           selfNickEl.textContent = "👁️ @" + pkt.selfNick + ">";
-          inputEl.placeholder = "👁️ Spectator Mode (Read-Only) — run /channels, /channel #name, /roster, /pins, /lore, /mood, or /settings...";
+          inputEl.placeholder = "👁️ Spectator Mode (Read-Only) — run /channels, /channel #name, /roster, /pins, /lore, /mood, /forge, or /settings...";
         } else {
           selfNickEl.textContent = "@" + pkt.selfNick + ">";
         }
         localStorage.setItem("llm_sim_nick", pkt.selfNick);
         feedEl.innerHTML = "";
         messages.clear();
+        syncCatalogViews(pkt.catalog, pkt.scenarios || (pkt.state && pkt.state.scenarios));
         updateHeader(pkt.state);
         statusEl.textContent = pkt.state.statusText || (pkt.isSpectator ? "👁️ Watching live in Read-Only Spectator Mode" : "Ready — Type a message or /command");
         for (const m of pkt.state.messages) {
           messages.set(m.id, m);
           renderMessageNode(m);
         }
+      } else if (pkt.type === "catalog:update") {
+        syncCatalogViews(pkt.catalog, pkt.scenarios);
       } else if (pkt.type === "message:upsert") {
         messages.set(pkt.message.id, pkt.message);
         renderMessageNode(pkt.message);
@@ -1095,6 +1298,160 @@ export function renderWebClientHtml(): string {
       });
     }
 
+    function openForgeModal() {
+      if (forgeDialog && typeof forgeDialog.showModal === "function") {
+        forgeDialog.showModal();
+      }
+    }
+
+    if (openForgeBtn) {
+      openForgeBtn.addEventListener("click", openForgeModal);
+    }
+    if (drawerForgeBtn) {
+      drawerForgeBtn.addEventListener("click", openForgeModal);
+    }
+    if (forgeDialog) {
+      if (!("closedBy" in HTMLDialogElement.prototype)) {
+        forgeDialog.addEventListener("click", (e) => {
+          if (e.target !== forgeDialog) return;
+          const r = forgeDialog.getBoundingClientRect();
+          if (
+            e.clientX < r.left ||
+            e.clientX > r.right ||
+            e.clientY < r.top ||
+            e.clientY > r.bottom
+          ) {
+            forgeDialog.close("dismiss");
+          }
+        });
+      }
+    }
+
+    if (forgeTemplateSelect) {
+      forgeTemplateSelect.addEventListener("change", () => {
+        const selectedId = forgeTemplateSelect.value;
+        const p = catalogPersonas.find(item => item.id === selectedId);
+        if (!p) return;
+        document.getElementById("forge-id").value = p.id;
+        document.getElementById("forge-nick").value = p.nick;
+        document.getElementById("forge-avatar").value = p.avatar || "🤖";
+        document.getElementById("forge-color").value = p.color || "#8be9fd";
+        document.getElementById("forge-era").value = p.era || "Custom Era";
+        document.getElementById("forge-family").value = p.family || "Custom Forge";
+        document.getElementById("forge-talk").value = String(p.talkativeness || 0.65);
+        document.getElementById("forge-bio").value = p.bio || "";
+        document.getElementById("forge-prompt").value = p.systemPrompt || "";
+      });
+    }
+
+    const forgeAutoBtn = document.getElementById("forge-auto-btn");
+    if (forgeAutoBtn) {
+      forgeAutoBtn.addEventListener("click", () => {
+        const concept = document.getElementById("forge-auto-concept").value.trim();
+        const idHint = document.getElementById("forge-id").value.trim() || "custom-bot";
+        if (!concept || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: "command", raw: "/forge auto " + idHint + " " + concept }));
+        if (forgeDialog) forgeDialog.close("forged");
+      });
+    }
+
+    const personaForgeForm = document.getElementById("persona-forge-form");
+    if (personaForgeForm) {
+      personaForgeForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const clean = (v) => String(v || "").replace(/\|/g, "/").replace(/\s+/g, " ").trim();
+        const id = clean(document.getElementById("forge-id").value) || "custom-bot";
+        const nick = clean(document.getElementById("forge-nick").value) || id;
+        const avatar = clean(document.getElementById("forge-avatar").value) || "🤖";
+        const era = clean(document.getElementById("forge-era").value) || "2026 Custom";
+        const family = clean(document.getElementById("forge-family").value) || "Persona Forge";
+        const bio = clean(document.getElementById("forge-bio").value) || "Custom forged persona.";
+        const prompt = clean(document.getElementById("forge-prompt").value) || ("You are " + nick + ". " + bio);
+        const talk = clean(document.getElementById("forge-talk").value) || "0.65";
+        const color = clean(document.getElementById("forge-color").value) || "#8be9fd";
+        const rawCmd = "/forge new " + [id, nick, avatar, era, family, bio, prompt, talk, color].join(" | ");
+        ws.send(JSON.stringify({ type: "command", raw: rawCmd }));
+        if (forgeDialog) forgeDialog.close("saved");
+      });
+    }
+
+    const forgeExportBtn = document.getElementById("forge-export-btn");
+    if (forgeExportBtn) {
+      forgeExportBtn.addEventListener("click", () => {
+        const id = document.getElementById("forge-id").value.trim();
+        if (id && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "command", raw: "/forge export " + id }));
+        }
+      });
+    }
+
+    const forgeDeleteBtn = document.getElementById("forge-delete-btn");
+    if (forgeDeleteBtn) {
+      forgeDeleteBtn.addEventListener("click", () => {
+        const id = document.getElementById("forge-id").value.trim();
+        if (id && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "command", raw: "/forge delete " + id }));
+        }
+      });
+    }
+
+    const scenarioSnapshotBtn = document.getElementById("scenario-snapshot-btn");
+    if (scenarioSnapshotBtn) {
+      scenarioSnapshotBtn.addEventListener("click", () => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const id = document.getElementById("scenario-id").value.trim() || "room-snapshot";
+        const title = document.getElementById("scenario-title").value.trim() || ("📸 " + (currentChannelState ? currentChannelState.channelName : "#latent-space") + " Showdown");
+        const evText = document.getElementById("scenario-event").value.trim();
+        const cmd = "/make-scenario snapshot " + id + " " + title + (evText ? " | " + evText : "");
+        ws.send(JSON.stringify({ type: "command", raw: cmd }));
+        if (forgeDialog) forgeDialog.close("snapshot");
+      });
+    }
+
+    const scenarioPrefillBtn = document.getElementById("scenario-prefill-btn");
+    if (scenarioPrefillBtn) {
+      scenarioPrefillBtn.addEventListener("click", () => {
+        if (!currentChannelState) return;
+        const chanSlug = String(currentChannelState.channelName || "room").replace(/^#/, "");
+        document.getElementById("scenario-id").value = chanSlug + "-showdown";
+        document.getElementById("scenario-title").value = "🎬 " + currentChannelState.channelName + " Showdown";
+        document.getElementById("scenario-bots").value = (currentChannelState.activePersonas || []).map(p => p.id).join(", ");
+        document.getElementById("scenario-event").value = (coopPadEl && coopPadEl.value.trim()) || ("Showdown in " + currentChannelState.channelName + "!");
+      });
+    }
+
+    function buildScenarioCmd(subVerb) {
+      const clean = (v) => String(v || "").replace(/\|/g, "/").replace(/\s+/g, " ").trim();
+      const id = clean(document.getElementById("scenario-id").value) || "custom-scenario";
+      const title = clean(document.getElementById("scenario-title").value) || ("🎬 " + id);
+      const bots = clean(document.getElementById("scenario-bots").value) || "sydney, opus-3, eliza";
+      const vibeRadio = document.querySelector('input[name="scenario_vibe"]:checked');
+      const presetRadio = document.querySelector('input[name="scenario_preset"]:checked');
+      const vibe = vibeRadio ? vibeRadio.value : "debate";
+      const preset = presetRadio ? presetRadio.value : "banter";
+      const evText = clean(document.getElementById("scenario-event").value) || ("Showdown " + title + " begins!");
+      return "/make-scenario " + subVerb + " " + [id, title, bots, vibe, preset, evText].join(" | ");
+    }
+
+    const scenarioForgeForm = document.getElementById("scenario-forge-form");
+    if (scenarioForgeForm) {
+      scenarioForgeForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        if (ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: "command", raw: buildScenarioCmd("launch") }));
+        if (forgeDialog) forgeDialog.close("launched");
+      });
+    }
+
+    const scenarioSaveOnlyBtn = document.getElementById("scenario-save-only-btn");
+    if (scenarioSaveOnlyBtn) {
+      scenarioSaveOnlyBtn.addEventListener("click", () => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: "command", raw: buildScenarioCmd("new") }));
+      });
+    }
+
     formEl.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = inputEl.value.trim();
@@ -1102,6 +1459,11 @@ export function renderWebClientHtml(): string {
       const lower = text.toLowerCase();
       if (lower === "/settings" || lower === "/menu" || lower === "/options") {
         openSettingsModal();
+        inputEl.value = "";
+        return;
+      }
+      if (lower === "/forge ui" || lower === "/persona ui" || lower === "/make-scenario ui" || lower === "/scenario ui") {
+        openForgeModal();
         inputEl.value = "";
         return;
       }

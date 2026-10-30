@@ -109,6 +109,8 @@ export class ChatroomApp {
   private editor: Editor;
   private settingsOverlay: OverlayHandle | null = null;
   private settingsModal: SettingsModalComponent | null = null;
+  private forgeOverlay: OverlayHandle | null = null;
+  private forgeModal: SettingsModalComponent | null = null;
 
   constructor(roomOrOptions?: Room | ChatroomAppOptions) {
     const opts: ChatroomAppOptions =
@@ -254,8 +256,14 @@ export class ChatroomApp {
   private handleServerPacket(packet: ServerPacket): void {
     if (packet.type === "sync") {
       for (const p of packet.catalog) {
-        if (!this.room.registry.get(p.id)) {
-          this.room.registry.register(p, false);
+        this.room.registry.register(p, false);
+      }
+      const incomingScenarios = packet.scenarios ?? packet.state.scenarios;
+      if (incomingScenarios) {
+        for (const sc of incomingScenarios) {
+          if (sc.isCustom) {
+            this.room.registry.saveScenario(sc, false);
+          }
         }
       }
       const s = packet.state;
@@ -345,8 +353,14 @@ export class ChatroomApp {
 
     if (packet.type === "catalog:update") {
       for (const p of packet.catalog) {
-        if (!this.room.registry.get(p.id)) {
-          this.room.registry.register(p, false);
+        this.room.registry.register(p, false);
+        this.room.refreshActivePersona(p);
+      }
+      if (packet.scenarios) {
+        for (const sc of packet.scenarios) {
+          if (sc.isCustom) {
+            this.room.registry.saveScenario(sc, false);
+          }
         }
       }
       this.syncViews();
@@ -426,12 +440,23 @@ export class ChatroomApp {
         if (this.isSettingsOpen()) {
           this.closeSettingsMenu();
         } else {
+          if (this.isForgeOpen()) this.closeForgeMenu();
           this.openSettingsMenu();
         }
         return { consume: true };
       }
 
-      if (this.isSettingsOpen()) {
+      if (matchesKey(data, "ctrl+f")) {
+        if (this.isForgeOpen()) {
+          this.closeForgeMenu();
+        } else {
+          if (this.isSettingsOpen()) this.closeSettingsMenu();
+          this.openForgeMenu();
+        }
+        return { consume: true };
+      }
+
+      if (this.isSettingsOpen() || this.isForgeOpen()) {
         return undefined;
       }
 
@@ -633,6 +658,174 @@ export class ChatroomApp {
     this.syncViews();
   }
 
+  public getForgeItems(): SettingItem[] {
+    const scenarios = this.room.getAllScenarios();
+    const activePersonas = this.room.activePersonas;
+    const allPersonas = this.room.registry.all();
+    const items: SettingItem[] = [
+      {
+        id: "snapshot_room",
+        label: "[Scenario] 📸 Snapshot Current Room",
+        currentValue: "ready",
+        values: ["ready", "save-snapshot"],
+        description:
+          "Capture active cast, vibe, and preset as a reusable custom scenario",
+      },
+      {
+        id: "launch_scenario",
+        label: "[Scenario] 🎬 Launch Scenario",
+        currentValue: scenarios[0]?.id ?? "1972-arpanet",
+        values: scenarios.map((s) => s.id),
+        description: `Launch any built-in or custom showdown (${scenarios.length} available)`,
+      },
+      {
+        id: "clone_persona",
+        label: "[Forge] 🧬 Clone & Variant-Fork Persona",
+        currentValue: "select",
+        values: ["select", ...allPersonas.map((p) => p.id)],
+        description:
+          "Clone any catalog persona into a custom <id>-variant and summon it",
+      },
+    ];
+
+    for (const p of activePersonas) {
+      items.push({
+        id: `talk:${p.id}`,
+        label: `[Bot <${p.nick}>] 🔊 Talkativeness`,
+        currentValue: String(p.talkativeness),
+        values: ["0.2", "0.4", "0.55", "0.65", "0.75", "0.85", "0.95"],
+        description: `Live-edit talkativeness weight for ${p.displayName} (${p.id})`,
+      });
+      items.push({
+        id: `avatar:${p.id}`,
+        label: `[Bot <${p.nick}>] 🎭 Avatar Badge`,
+        currentValue: p.avatar,
+        values: Array.from(
+          new Set([p.avatar, "🤖", "🔥", "⚡", "🧠", "🎭", "👾", "🛸", "💎", "🌀"])
+        ),
+        description: `Live-edit avatar emoji for ${p.displayName} (${p.id})`,
+      });
+    }
+
+    return items;
+  }
+
+  public isForgeOpen(): boolean {
+    return this.forgeOverlay !== null && !this.forgeOverlay.isHidden();
+  }
+
+  public openForgeMenu(_initialTab?: "persona" | "scenario"): void {
+    if (this.isForgeOpen()) {
+      return;
+    }
+
+    const applyForgeAction = (id: string, newValue: string) => {
+      let rawCmd: string | null = null;
+      if (id === "snapshot_room" && newValue === "save-snapshot") {
+        const cleanChan = this.room.channelName
+          .replace(/^#/, "")
+          .replace(/[^a-z0-9-]+/gi, "-")
+          .toLowerCase();
+        const snapId = `${cleanChan}-snap`;
+        rawCmd = `/make-scenario snapshot ${snapId} 📸 ${this.room.channelName} Custom Showdown`;
+      } else if (id === "launch_scenario") {
+        rawCmd = `/scenario ${newValue}`;
+      } else if (id === "clone_persona" && newValue !== "select") {
+        rawCmd = `/forge clone ${newValue} ${newValue}-fork`;
+      } else if (id.startsWith("talk:")) {
+        const pid = id.slice("talk:".length);
+        rawCmd = `/forge edit ${pid} talkativeness ${newValue}`;
+      } else if (id.startsWith("avatar:")) {
+        const pid = id.slice("avatar:".length);
+        rawCmd = `/forge edit ${pid} avatar ${newValue}`;
+      }
+
+      if (!rawCmd) return;
+      if (this.wsUrl) {
+        this.sendClientPacket({ type: "command", raw: rawCmd });
+      } else {
+        void handleSlashCommand(rawCmd, this.room, {
+          senderNick: this.selfNick,
+          isHost: this.isHost,
+        }).then(() => {
+          this.syncViews();
+        });
+      }
+    };
+
+    const items = this.getForgeItems();
+    const list = new SettingsList(
+      items,
+      12,
+      settingsListTheme,
+      applyForgeAction,
+      () => {
+        this.closeForgeMenu();
+      },
+      { enableSearch: false }
+    );
+
+    this.forgeModal = new SettingsModalComponent(
+      () =>
+        `🔨 Persona Forge & Scenario Builder Studio — ${this.room.channelName} (${this.room.registry.customPersonas().length} custom bots • ${this.room.registry.customScenarios().length} custom scenes)`,
+      list,
+      (direction) => {
+        if (!this.forgeModal) return;
+        const listAny = this.forgeModal.list as unknown as {
+          items: SettingItem[];
+          selectedIndex: number;
+        };
+        const item = listAny.items?.[listAny.selectedIndex];
+        if (!item || !item.values || item.values.length === 0) return;
+        const len = item.values.length;
+        const curIdx = item.values.indexOf(item.currentValue);
+        const nextIdx =
+          curIdx >= 0
+            ? (curIdx + direction + len) % len
+            : direction > 0
+              ? 0
+              : len - 1;
+        const newValue = item.values[nextIdx]!;
+        item.currentValue = newValue;
+        applyForgeAction(item.id, newValue);
+      }
+    );
+
+    if (this.isStarted) {
+      this.forgeOverlay = this.tui.showOverlay(this.forgeModal, {
+        width: "85%",
+        minWidth: 56,
+        maxHeight: "85%",
+        anchor: "center",
+      });
+    } else {
+      let hidden = false;
+      this.forgeOverlay = {
+        hide: () => {
+          hidden = true;
+        },
+        setHidden: (h: boolean) => {
+          hidden = h;
+        },
+        isHidden: () => hidden,
+        focus: () => {},
+        unfocus: () => {},
+        isFocused: () => !hidden,
+      };
+    }
+    this.syncViews();
+  }
+
+  public closeForgeMenu(): void {
+    if (this.forgeOverlay) {
+      this.forgeOverlay.hide();
+      this.forgeOverlay = null;
+      this.forgeModal = null;
+    }
+    this.tui.setFocus(this.editor);
+    this.syncViews();
+  }
+
   private refreshSettingsMenuValues(): void {
     if (!this.settingsModal) return;
     this.settingsModal.list.updateValue(
@@ -663,6 +856,22 @@ export class ChatroomApp {
       return;
     }
 
+    if (
+      cleanLower === "/forge ui" ||
+      cleanLower === "/persona ui" ||
+      cleanLower === "/craft ui"
+    ) {
+      this.openForgeMenu("persona");
+      return;
+    }
+    if (
+      cleanLower === "/make-scenario ui" ||
+      cleanLower === "/scenario ui"
+    ) {
+      this.openForgeMenu("scenario");
+      return;
+    }
+
     if (this.wsUrl) {
       if (text.startsWith("/")) {
         this.sendClientPacket({ type: "command", raw: text });
@@ -678,6 +887,7 @@ export class ChatroomApp {
         isHost: this.isHost,
         onQuit: () => this.quit(),
         onOpenSettings: () => this.openSettingsMenu(),
+        onOpenForge: (tab) => this.openForgeMenu(tab),
       });
       return;
     }

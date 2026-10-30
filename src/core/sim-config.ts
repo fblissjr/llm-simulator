@@ -1,4 +1,5 @@
 import type {
+  CuratedScenario,
   DirectorMode,
   HumanInterruptMode,
   ResponseStyle,
@@ -7,6 +8,8 @@ import type {
   SimPresetId,
   ThinkingDisplayMode,
 } from "../types.ts";
+
+export type { CuratedScenario };
 
 export interface SimPresetDefinition {
   id: Exclude<SimPresetId, "custom">;
@@ -614,15 +617,61 @@ export function applySimConfigMutation(
   return { config: next, descriptor };
 }
 
-export interface CuratedScenario {
-  id: string;
-  title: string;
-  description: string;
-  personas: string[];
-  vibeKey: string;
-  vibe?: string;
-  preset: Exclude<SimPresetId, "custom">;
-  openingStageEvent: string;
+export function normalizeScenarioSpec(
+  spec: Partial<CuratedScenario> & { id: string; title?: string }
+): CuratedScenario {
+  const id = (spec.id || "custom-scenario")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "custom-scenario";
+
+  const rawVibeKey = (spec.vibeKey || "chat").toLowerCase().trim();
+  const validVibes = ["chat", "debate", "roast", "chaos"];
+  const vibeKey = validVibes.includes(rawVibeKey) ? rawVibeKey : "custom";
+  const vibe =
+    spec.vibe?.trim() ||
+    (vibeKey === "custom" ? spec.vibeKey?.trim() : undefined);
+
+  const rawPreset = (spec.preset || "lively").toLowerCase().trim() as Exclude<
+    SimPresetId,
+    "custom"
+  >;
+  const preset: Exclude<SimPresetId, "custom"> =
+    rawPreset in SIM_PRESETS ? rawPreset : "lively";
+
+  const personas = Array.isArray(spec.personas)
+    ? spec.personas
+        .map((p) => String(p).trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  const finalPersonas =
+    personas.length > 0 ? personas : ["eliza", "sydney", "opus-3"];
+
+  const title =
+    spec.title?.trim() ||
+    `🎬 ${id
+      .split("-")
+      .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : ""))
+      .join(" ")}`;
+  const openingStageEvent =
+    spec.openingStageEvent?.trim() ||
+    `A new custom showdown (${title}) begins in the channel!`;
+  const description =
+    spec.description?.trim() ||
+    `Custom showdown with ${finalPersonas.join(", ")} (${vibeKey.toUpperCase()} / ${preset.toUpperCase()})`;
+
+  return {
+    id,
+    title,
+    description,
+    personas: finalPersonas,
+    vibeKey,
+    ...(vibe ? { vibe } : {}),
+    preset,
+    openingStageEvent,
+    isCustom: spec.isCustom ?? true,
+  };
 }
 
 export const BUILTIN_SCENARIOS: CuratedScenario[] = [

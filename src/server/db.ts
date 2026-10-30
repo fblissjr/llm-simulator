@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type {
   ChatMessage,
   ChatMessageImage,
+  CuratedScenario,
   Persona,
   PersonaEngineBinding,
   PersonaMoodState,
@@ -76,6 +77,12 @@ export class SimDatabase {
         id TEXT PRIMARY KEY,
         json TEXT NOT NULL,
         created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS custom_scenarios (
+        id TEXT PRIMARY KEY,
+        json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS persona_bindings (
@@ -452,6 +459,52 @@ export class SimDatabase {
       }
     }
     return result;
+  }
+
+  public deleteCustomPersona(id: string): boolean {
+    const res = this.db.run("DELETE FROM custom_personas WHERE id = ?", [
+      id.toLowerCase(),
+    ]);
+    return res.changes > 0;
+  }
+
+  public saveCustomScenario(scenario: CuratedScenario): void {
+    const normalized: CuratedScenario = { ...scenario, isCustom: true };
+    this.db.run(
+      `INSERT INTO custom_scenarios (id, json, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         json = excluded.json,
+         updated_at = excluded.updated_at`,
+      [scenario.id.toLowerCase(), JSON.stringify(normalized), Date.now()]
+    );
+  }
+
+  public loadCustomScenarios(): CuratedScenario[] {
+    const rows = this.db
+      .query<{ json: string }, []>(
+        "SELECT json FROM custom_scenarios ORDER BY updated_at ASC"
+      )
+      .all();
+    const result: CuratedScenario[] = [];
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.json) as CuratedScenario;
+        if (parsed && parsed.id) {
+          result.push({ ...parsed, isCustom: true });
+        }
+      } catch {
+        // Ignore corrupted JSON
+      }
+    }
+    return result;
+  }
+
+  public deleteCustomScenario(id: string): boolean {
+    const res = this.db.run("DELETE FROM custom_scenarios WHERE id = ?", [
+      id.toLowerCase(),
+    ]);
+    return res.changes > 0;
   }
 
   public setPersonaBinding(

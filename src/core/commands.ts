@@ -24,6 +24,7 @@ export interface CommandExecutionContext {
   notifyCaller?: (text: string) => void;
   onQuit?: () => void;
   onOpenSettings?: () => void;
+  onOpenForge?: (tab?: "persona" | "scenario") => void;
   onChangeNick?: (newNick: string) => void;
   onSwitchChannel?: (channelName: string) => void;
   onListChannels?: () => void;
@@ -598,42 +599,72 @@ export const COMMANDS: CommandDefinition[] = [
   {
     name: "scenario",
     aliases: ["showdown", "scene-preset"],
-    argumentHint: "[scenario-id]",
+    argumentHint: "[scenario-id | snapshot <id> <title> | delete <id>]",
     description:
-      "Launch a curated multi-model showdown scenario (summons cast, sets vibe & pacing, and fires opening event)",
+      "Launch a curated or custom multi-model showdown scenario (or snapshot/manage custom scenarios)",
     hostOnlyWhenLocked: true,
-    getArgumentCompletions: (prefix) =>
-      filterItems(
-        BUILTIN_SCENARIOS.map((s) => ({
-          value: s.id,
-          label: s.title,
-          description: `[Cast: ${s.personas.join(", ")}] ${s.description}`,
-        })),
+    getArgumentCompletions: (prefix, room) => {
+      const scenarios = room.getAllScenarios();
+      return filterItems(
+        [
+          ...scenarios.map((s) => ({
+            value: s.id,
+            label: `${s.title}${s.isCustom ? " [CUSTOM]" : ""}`,
+            description: `[Cast: ${s.personas.join(", ")}] ${s.description}`,
+          })),
+          {
+            value: "snapshot ",
+            label: "📸 snapshot <id> <title>",
+            description:
+              "Capture the current channel's bots, vibe, and preset as a reusable scenario",
+          },
+        ],
         prefix
-      ),
+      );
+    },
     execute: async (args, room, ctx) => {
-      const query = args.trim().toLowerCase();
-      if (!query) {
+      const trimmed = args.trim();
+      const lower = trimmed.toLowerCase();
+      if (!trimmed || lower === "list") {
+        const scenarios = room.getAllScenarios();
         const lines = [
-          "═══ Curated Multi-Model Showdown Scenarios (/scenario <id>) ═══",
+          "═══ Multi-Model Showdown Scenarios (/scenario <id> or /make-scenario) ═══",
         ];
-        for (const s of BUILTIN_SCENARIOS) {
+        for (const s of scenarios) {
+          const badge = s.isCustom ? " [CUSTOM]" : "";
           lines.push(
-            `  • /scenario ${s.id.padEnd(18)} — ${s.title}\n      Cast: ${s.personas.join(", ")} │ Vibe: ${s.vibeKey.toUpperCase()} │ Pace: ${s.preset.toUpperCase()}\n      ${s.description}`
+            `  • /scenario ${s.id.padEnd(18)} — ${s.title}${badge}\n      Cast: ${s.personas.join(", ")} │ Vibe: ${s.vibeKey.toUpperCase()} │ Pace: ${s.preset.toUpperCase()}\n      ${s.description}`
           );
         }
+        lines.push(
+          "\n  Tip: Create custom scenarios with /make-scenario snapshot <id> <title>, /make-scenario new ..., or open 🔨 Forge (Ctrl+F in TUI)!"
+        );
         replyToCaller(room, ctx, lines.join("\n"));
         return;
       }
 
-      const scenario = BUILTIN_SCENARIOS.find(
-        (s) => s.id.toLowerCase() === query || s.id.toLowerCase().includes(query)
-      );
+      const firstWord = trimmed.split(/\s+/)[0]?.toLowerCase() ?? "";
+      if (
+        ["snapshot", "new", "create", "save", "auto", "ai", "delete", "rm", "ui"].includes(
+          firstWord
+        )
+      ) {
+        const makeCmd = COMMANDS.find((c) => c.name === "make-scenario");
+        if (makeCmd) {
+          await makeCmd.execute(trimmed, room, ctx);
+          return;
+        }
+      }
+
+      const scenario = room.findScenario(lower);
       if (!scenario) {
         replyToCaller(
           room,
           ctx,
-          `Unknown scenario "${query}". Available: ${BUILTIN_SCENARIOS.map((s) => s.id).join(", ")}`
+          `Unknown scenario "${trimmed}". Available: ${room
+            .getAllScenarios()
+            .map((s) => s.id)
+            .join(", ")}`
         );
         return;
       }
@@ -649,7 +680,7 @@ export const COMMANDS: CommandDefinition[] = [
       room.setConfigPreset(scenario.preset);
       room.addLore(`${scenario.title}: ${scenario.openingStageEvent}`);
       room.addSystemMessage(
-        `🎬 SCENARIO LAUNCHED — ${scenario.title}\n    └─ ${scenario.openingStageEvent}`,
+        `🎬 SCENARIO LAUNCHED — ${scenario.title}${scenario.isCustom ? " [CUSTOM]" : ""}\n    └─ ${scenario.openingStageEvent}`,
         "event"
       );
 
@@ -659,6 +690,685 @@ export const COMMANDS: CommandDefinition[] = [
           forceAllSteps: true,
         });
       }
+    },
+  },
+  {
+    name: "make-scenario",
+    aliases: ["forge-scenario", "scene-forge"],
+    argumentHint:
+      "[snapshot <id> <title> | new <id>|<title>|<bots>|<vibe>|<preset>|<event> | auto <id> <concept> | delete <id>]",
+    description:
+      "Create, snapshot, auto-synthesize, or delete custom multi-bot showdown scenarios",
+    hostOnlyWhenLocked: true,
+    getArgumentCompletions: (prefix, room) => {
+      const custom = room.registry.customScenarios();
+      return filterItems(
+        [
+          {
+            value: "snapshot ",
+            label: "📸 snapshot <id> <title> | [opening event]",
+            description:
+              "Save the current room's active bots, vibe, and pacing preset as a scenario",
+          },
+          {
+            value: "auto ",
+            label: "✨ auto <id> <concept description...>",
+            description:
+              "Synthesize a custom multi-bot showdown from a concept prompt",
+          },
+          {
+            value: "new ",
+            label: "🎬 new <id> | <title> | <bots> | <vibe> | <preset> | <event>",
+            description: "Define a custom scenario from explicit fields",
+          },
+          ...custom.map((s) => ({
+            value: `delete ${s.id}`,
+            label: `🗑️ delete ${s.id}`,
+            description: `Delete custom scenario "${s.title}"`,
+          })),
+        ],
+        prefix
+      );
+    },
+    execute: async (args, room, ctx) => {
+      const trimmed = args.trim();
+      const lower = trimmed.toLowerCase();
+
+      if (lower === "ui" && ctx?.onOpenForge) {
+        ctx.onOpenForge("scenario");
+        return;
+      }
+
+      if (!trimmed || lower === "list") {
+        const custom = room.registry.customScenarios();
+        const lines = [
+          "🎬 ═══ Custom Scenario Builder (/make-scenario) ═══",
+          custom.length > 0
+            ? `  Saved Custom Scenarios (${custom.length}):\n` +
+              custom
+                .map(
+                  (s) =>
+                    `    • ${s.id.padEnd(18)} — ${s.title} [Cast: ${s.personas.join(", ")} │ ${s.vibeKey.toUpperCase()} / ${s.preset.toUpperCase()}]`
+                )
+                .join("\n")
+            : "  Saved Custom Scenarios: (none yet — create one below!)",
+          "",
+          "  Commands:",
+          "    • /make-scenario snapshot <id> <title> [| <opening event>] — Save current room cast & vibe",
+          "    • /make-scenario auto <id> <concept...>                    — Synthesize a showdown from a concept",
+          "    • /make-scenario new <id> | <title> | <bot1,bot2> | <vibe> | <preset> | <opening event>",
+          "    • /make-scenario delete <id>                               — Delete a custom scenario",
+          "    • Launch any saved scenario anytime with: /scenario <id>",
+        ];
+        replyToCaller(room, ctx, lines.join("\n"));
+        return;
+      }
+
+      const firstToken = trimmed.split(/\s+/)[0]?.toLowerCase() ?? "";
+
+      if (firstToken === "delete" || firstToken === "rm" || firstToken === "remove") {
+        const targetId = trimmed.replace(/^(?:delete|rm|remove)\s+/i, "").trim();
+        if (!targetId) {
+          replyToCaller(room, ctx, "Usage: /make-scenario delete <scenario-id>");
+          return;
+        }
+        const res = room.deleteCustomScenario(targetId, true);
+        if (!res.deleted) {
+          replyToCaller(room, ctx, `No custom scenario matching "${targetId}" found.`);
+          return;
+        }
+        ctx?.onCatalogChanged?.();
+        replyToCaller(
+          room,
+          ctx,
+          res.restoredBuiltin
+            ? `🔄 Restored built-in scenario "${res.id}" to factory defaults.`
+            : `🗑️ Deleted custom scenario "${res.id}".`
+        );
+        return;
+      }
+
+      if (firstToken === "snapshot") {
+        const rest = trimmed.replace(/^snapshot\s+/i, "").trim();
+        if (!rest) {
+          replyToCaller(
+            room,
+            ctx,
+            "Usage: /make-scenario snapshot <id> <title> [| <openingStageEvent>]"
+          );
+          return;
+        }
+        const [leftPart, eventPart] = rest.split("|").map((s) => s.trim());
+        const tokens = (leftPart ?? "").split(/\s+/).filter(Boolean);
+        const id = tokens[0] || "room-snapshot";
+        const title =
+          tokens.slice(1).join(" ").trim() ||
+          `📸 ${room.channelName} Showdown (${id})`;
+
+        const scenario = room.snapshotCurrentScenario(
+          id,
+          title,
+          eventPart,
+          undefined,
+          true
+        );
+        ctx?.onCatalogChanged?.();
+        room.addSystemMessage(
+          `📸 [SCENARIO SNAPSHOT SAVED] ${scenario.title} (/scenario ${scenario.id})\n    └─ Cast: ${scenario.personas.join(", ")} │ Vibe: ${scenario.vibeKey.toUpperCase()} │ Pace: ${scenario.preset.toUpperCase()}`,
+          "event"
+        );
+        return;
+      }
+
+      if (firstToken === "auto" || firstToken === "ai" || firstToken === "synth") {
+        const rest = trimmed.replace(/^(?:auto|ai|synth)\s+/i, "").trim();
+        const tokens = rest.split(/\s+/).filter(Boolean);
+        if (tokens.length < 2) {
+          replyToCaller(
+            room,
+            ctx,
+            "Usage: /make-scenario auto <scenario-id> <concept description...>"
+          );
+          return;
+        }
+        const idHint = tokens[0]!;
+        const concept = tokens.slice(1).join(" ");
+        room.statusText = `🎬 Designing custom scenario "${idHint}"...`;
+        room.callbacks?.onStatusChange?.(room.statusText);
+        try {
+          const scenario = await room.registry.synthesizeScenario(
+            concept,
+            room.gemini,
+            idHint,
+            true
+          );
+          room.statusText = "";
+          room.callbacks?.onStatusChange?.("");
+          ctx?.onCatalogChanged?.();
+          room.addSystemMessage(
+            `🎬 [SCENARIO FORGED] ${scenario.title} (/scenario ${scenario.id})\n    └─ Cast: ${scenario.personas.join(", ")} │ Vibe: ${scenario.vibeKey.toUpperCase()} │ Pace: ${scenario.preset.toUpperCase()}\n    └─ Opening: "${scenario.openingStageEvent}"`,
+            "event"
+          );
+        } catch (err) {
+          room.statusText = "";
+          room.callbacks?.onStatusChange?.("");
+          replyToCaller(
+            room,
+            ctx,
+            `⚠️ Failed to synthesize scenario: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+        return;
+      }
+
+      // Structured pipe syntax: /make-scenario [new|create|launch] <id> | <title> | <bot1,bot2> | <vibeKey> | <preset> | <openingStageEvent> [| <description>]
+      const shouldLaunch = firstToken === "launch";
+      const body = trimmed.replace(/^(?:new|create|save|launch)\s+/i, "").trim();
+      const segments = body.split("|").map((s) => s.trim());
+      if (segments.length < 2) {
+        replyToCaller(
+          room,
+          ctx,
+          "Usage:\n  • /make-scenario snapshot <id> <title> [| <opening event>]\n  • /make-scenario new <id> | <title> | <bot1,bot2,...> | <vibeKey> | <preset> | <openingStageEvent>\n  • /make-scenario auto <id> <concept description...>"
+        );
+        return;
+      }
+
+      const [rawId, rawTitle, rawBots, rawVibe, rawPreset, rawEvent, rawDesc] =
+        segments;
+      const botTokens = (rawBots ?? "")
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const personas =
+        botTokens.length > 0
+          ? botTokens
+          : room.activePersonas.map((p) => p.id);
+
+      const scenario = room.saveCustomScenario(
+        {
+          id: rawId || "custom-scenario",
+          title: rawTitle || `🎬 ${rawId}`,
+          personas,
+          vibeKey: rawVibe || room.vibeKey,
+          preset: (rawPreset as Exclude<SimPresetId, "custom">) || "lively",
+          openingStageEvent:
+            rawEvent ||
+            `Custom showdown "${rawTitle || rawId}" begins in ${room.channelName}!`,
+          description: rawDesc,
+        },
+        true
+      );
+      ctx?.onCatalogChanged?.();
+      room.addSystemMessage(
+        `🎬 [CUSTOM SCENARIO SAVED] ${scenario.title} (run "/scenario ${scenario.id}" to launch!)\n    └─ Cast: ${scenario.personas.join(", ")} │ Vibe: ${scenario.vibeKey.toUpperCase()} │ Pace: ${scenario.preset.toUpperCase()}`,
+        "event"
+      );
+
+      if (shouldLaunch) {
+        const scenarioCmd = COMMANDS.find((c) => c.name === "scenario");
+        await scenarioCmd?.execute(scenario.id, room, ctx);
+      }
+    },
+  },
+  {
+    name: "forge",
+    aliases: ["persona", "craft", "create-bot"],
+    argumentHint:
+      "[new <id>|<nick>|<avatar>|<era>|<family>|<bio>|<prompt> | auto <id> <concept> | clone <src> <id> | edit <id> <field> <val> | export <id> | delete <id>]",
+    description:
+      "Interactive Persona Forge: create, auto-synthesize, clone, live-edit, export, or delete custom AI personas",
+    hostOnlyWhenLocked: true,
+    getArgumentCompletions: (prefix, room) => {
+      const trimmed = prefix.trimStart();
+      const parts = trimmed.split(/\s+/).filter(Boolean);
+      if (parts.length <= 1 && !trimmed.endsWith(" ")) {
+        return filterItems(
+          [
+            {
+              value: "auto ",
+              label: "✨ auto <id> <concept description...>",
+              description:
+                "Synthesize & summon a custom persona from a character concept",
+            },
+            {
+              value: "clone ",
+              label: "🧬 clone <source-model> <new-id> [new-nick] [| prompt tweak]",
+              description:
+                "Fork an existing persona and customize its prompt or personality",
+            },
+            {
+              value: "edit ",
+              label: "✏️ edit <model> <field> <value...>",
+              description:
+                "Live-edit nick, avatar, bio, systemPrompt, era, color, or talkativeness",
+            },
+            {
+              value: "new ",
+              label:
+                "🔨 new <id> | <nick> | <avatar> | <era> | <family> | <bio> | <systemPrompt>",
+              description: "Create a custom persona from structured fields",
+            },
+            {
+              value: "export ",
+              label: "📤 export <model>",
+              description: "Export any persona definition to ./personas/<id>.json",
+            },
+            {
+              value: "delete ",
+              label: "🗑️ delete <custom-id>",
+              description: "Delete a custom persona (or reset a modified built-in)",
+            },
+          ],
+          trimmed
+        );
+      }
+
+      const sub = parts[0]?.toLowerCase();
+      if (sub === "clone" || sub === "edit" || sub === "export") {
+        if (parts.length === 1 || (parts.length === 2 && !trimmed.endsWith(" "))) {
+          const modelPrefix = parts[1] ?? "";
+          return filterItems(
+            room.registry.all().map((p) => ({
+              value: `${sub} ${p.id} `,
+              label: `${p.avatar} ${p.id} (<${p.nick}>)`,
+              description: `${p.displayName} — ${p.bio}`,
+            })),
+            `${sub} ${modelPrefix}`
+          );
+        }
+        if (
+          sub === "edit" &&
+          (parts.length === 2 || (parts.length === 3 && !trimmed.endsWith(" ")))
+        ) {
+          const targetModel = parts[1]!;
+          const fieldPrefix = parts[2] ?? "";
+          const fields = [
+            "nick",
+            "displayName",
+            "avatar",
+            "color",
+            "era",
+            "family",
+            "talkativeness",
+            "bio",
+            "joinLine",
+            "leaveLine",
+            "systemPrompt",
+          ];
+          return filterItems(
+            fields.map((f) => ({
+              value: `edit ${targetModel} ${f} `,
+              label: `✏️ ${f}`,
+              description: `Update ${f} on ${targetModel}`,
+            })),
+            `edit ${targetModel} ${fieldPrefix}`
+          );
+        }
+      }
+
+      if (sub === "delete") {
+        const custom = room.registry.customPersonas();
+        return filterItems(
+          custom.map((p) => ({
+            value: `delete ${p.id}`,
+            label: `🗑️ ${p.avatar} ${p.id} (<${p.nick}>)`,
+            description: p.bio,
+          })),
+          trimmed
+        );
+      }
+
+      return null;
+    },
+    execute: async (args, room, ctx) => {
+      const trimmed = args.trim();
+      const lower = trimmed.toLowerCase();
+
+      if (lower === "ui" && ctx?.onOpenForge) {
+        ctx.onOpenForge("persona");
+        return;
+      }
+
+      if (!trimmed || lower === "list") {
+        const custom = room.registry.customPersonas();
+        const lines = [
+          "🔨 ═══ Interactive Persona Forge (/forge) ═══",
+          custom.length > 0
+            ? `  Custom & Modified Personas (${custom.length}):\n` +
+              custom
+                .map(
+                  (p) =>
+                    `    • ${p.avatar} ${p.id.padEnd(16)} (<${p.nick}> • ${p.era} • ${p.family} • talk=${p.talkativeness})\n        "${p.bio}"`
+                )
+                .join("\n")
+            : "  Custom & Modified Personas: (none yet — forge one below!)",
+          "",
+          "  Forge Commands:",
+          "    • /forge auto <id> <concept...>                                  — Synthesize & summon from a concept",
+          "    • /forge clone <source> <new-id> [new-nick] [| <prompt tweak>]   — Clone & customize an existing model",
+          "    • /forge edit <model> <field> <value...>                         — Live-edit nick, avatar, bio, systemPrompt, talkativeness...",
+          "    • /forge new <id> | <nick> | <avatar> | <era> | <family> | <bio> | <systemPrompt>",
+          "    • /forge export <model>                                          — Save to ./personas/<id>.json",
+          "    • /forge delete <id>                                             — Delete custom persona or restore built-in",
+          "    • Studio UI: Press Ctrl+F in Terminal TUI or click '🔨 Forge' in Browser UI!",
+        ];
+        replyToCaller(room, ctx, lines.join("\n"));
+        return;
+      }
+
+      const firstToken = trimmed.split(/\s+/)[0]?.toLowerCase() ?? "";
+
+      if (firstToken === "export") {
+        const target = trimmed.replace(/^export\s+/i, "").trim();
+        if (!target) {
+          replyToCaller(room, ctx, "Usage: /forge export <model-id-or-nick>");
+          return;
+        }
+        try {
+          const savedPath = room.registry.exportToDisk(target);
+          replyToCaller(
+            room,
+            ctx,
+            `📤 Exported persona "${target}" to ./personas/${path.basename(savedPath)}`
+          );
+        } catch (err) {
+          replyToCaller(
+            room,
+            ctx,
+            err instanceof Error ? err.message : String(err)
+          );
+        }
+        return;
+      }
+
+      if (firstToken === "delete" || firstToken === "rm" || firstToken === "remove") {
+        const target = trimmed.replace(/^(?:delete|rm|remove)\s+/i, "").trim();
+        if (!target) {
+          replyToCaller(room, ctx, "Usage: /forge delete <custom-persona-id>");
+          return;
+        }
+        const res = room.registry.deleteCustom(target, true);
+        if (!res.deleted) {
+          replyToCaller(
+            room,
+            ctx,
+            `No custom persona matching "${target}" found.`
+          );
+          return;
+        }
+        if (res.restoredBuiltin) {
+          room.refreshActivePersona(res.restoredBuiltin);
+          ctx?.onCatalogChanged?.();
+          room.addSystemMessage(
+            `🔄 Restored built-in persona ${res.restoredBuiltin.avatar} <${res.restoredBuiltin.nick}> (${res.id}) to factory defaults.`,
+            "event"
+          );
+        } else {
+          room.leave(res.id);
+          ctx?.onCatalogChanged?.();
+          room.addSystemMessage(
+            `🗑️ Deleted custom persona "${res.id}" from the Persona Forge.`,
+            "event"
+          );
+        }
+        return;
+      }
+
+      if (firstToken === "auto" || firstToken === "ai" || firstToken === "synth") {
+        const rest = trimmed.replace(/^(?:auto|ai|synth)\s+/i, "").trim();
+        const tokens = rest.split(/\s+/).filter(Boolean);
+        if (tokens.length === 0) {
+          replyToCaller(
+            room,
+            ctx,
+            "Usage: /forge auto <id-or-name> <character concept & quirks...>"
+          );
+          return;
+        }
+        const idHint = tokens[0]!;
+        const concept = tokens.length > 1 ? tokens.slice(1).join(" ") : idHint;
+        room.statusText = `🔨 Forging custom persona "${idHint}"...`;
+        room.callbacks?.onStatusChange?.(room.statusText);
+        try {
+          const persona = await room.registry.synthesizePersona(
+            concept,
+            room.gemini,
+            idHint,
+            true
+          );
+          room.statusText = "";
+          room.callbacks?.onStatusChange?.("");
+          room.refreshActivePersona(persona);
+          ctx?.onCatalogChanged?.();
+          room.join(persona);
+          room.addSystemMessage(
+            `🔨 [PERSONA FORGED] ${persona.avatar} <${persona.nick}> (${persona.id} • ${persona.family}, ${persona.era})\n    └─ Bio: "${persona.bio}"`,
+            "event"
+          );
+        } catch (err) {
+          room.statusText = "";
+          room.callbacks?.onStatusChange?.("");
+          replyToCaller(
+            room,
+            ctx,
+            `⚠️ Failed to forge persona: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+        return;
+      }
+
+      if (firstToken === "clone" || firstToken === "fork") {
+        const rest = trimmed.replace(/^(?:clone|fork)\s+/i, "").trim();
+        const [leftPart, tweakPart] = rest.split("|").map((s) => s.trim());
+        const tokens = (leftPart ?? "").split(/\s+/).filter(Boolean);
+        if (tokens.length < 2) {
+          replyToCaller(
+            room,
+            ctx,
+            "Usage: /forge clone <source-model> <new-id> [new-nick] [| <prompt or bio tweak>]"
+          );
+          return;
+        }
+        const [sourceQuery, newId, customNick] = tokens;
+        const source = room.registry.find(sourceQuery!);
+        if (!source) {
+          replyToCaller(
+            room,
+            ctx,
+            `Source persona "${sourceQuery}" not found. Check /roster.`
+          );
+          return;
+        }
+        try {
+          const cloned = room.registry.clonePersona(
+            source.id,
+            newId!,
+            {
+              ...(customNick ? { nick: customNick } : {}),
+              ...(tweakPart
+                ? {
+                    bio: `${source.bio} [Variant: ${tweakPart.slice(0, 80)}]`,
+                    systemPrompt: `${source.systemPrompt}\n\nVARIANT DIRECTIVE: ${tweakPart}`,
+                  }
+                : {}),
+            },
+            true
+          );
+          ctx?.onCatalogChanged?.();
+          room.join(cloned);
+          room.addSystemMessage(
+            `🧬 [PERSONA CLONED] ${cloned.avatar} <${cloned.nick}> (${cloned.id}) forked from <${source.nick}>${tweakPart ? ` — "${tweakPart}"` : ""}`,
+            "event"
+          );
+        } catch (err) {
+          replyToCaller(
+            room,
+            ctx,
+            err instanceof Error ? err.message : String(err)
+          );
+        }
+        return;
+      }
+
+      if (firstToken === "edit" || firstToken === "set") {
+        const rest = trimmed.replace(/^(?:edit|set)\s+/i, "").trim();
+        const tokens = rest.split(/\s+/);
+        if (tokens.length < 3) {
+          replyToCaller(
+            room,
+            ctx,
+            "Usage: /forge edit <model> <nick|displayName|avatar|color|era|family|talkativeness|bio|joinLine|leaveLine|systemPrompt> <value...>"
+          );
+          return;
+        }
+        const modelQuery = tokens[0]!;
+        const rawField = tokens[1]!.toLowerCase();
+        const value = rest
+          .slice(modelQuery.length)
+          .trimStart()
+          .slice(tokens[1]!.length)
+          .trim();
+
+        const target = room.registry.find(modelQuery);
+        if (!target) {
+          replyToCaller(room, ctx, `Persona "${modelQuery}" not found.`);
+          return;
+        }
+
+        const fieldMap: Record<string, keyof Persona> = {
+          nick: "nick",
+          displayname: "displayName",
+          name: "displayName",
+          family: "family",
+          lab: "family",
+          era: "era",
+          avatar: "avatar",
+          emoji: "avatar",
+          color: "color",
+          bio: "bio",
+          joinline: "joinLine",
+          join: "joinLine",
+          leaveline: "leaveLine",
+          leave: "leaveLine",
+          systemprompt: "systemPrompt",
+          prompt: "systemPrompt",
+          talkativeness: "talkativeness",
+          talk: "talkativeness",
+        };
+
+        const mappedField = fieldMap[rawField];
+        if (!mappedField) {
+          replyToCaller(
+            room,
+            ctx,
+            `Unknown persona field "${tokens[1]}". Valid fields: nick, displayName, avatar, color, era, family, talkativeness, bio, joinLine, leaveLine, systemPrompt`
+          );
+          return;
+        }
+
+        const override: Partial<Persona> & { id: string } = {
+          ...target,
+          id: target.id,
+        };
+        if (mappedField === "talkativeness") {
+          const num = Number(value);
+          if (!Number.isFinite(num)) {
+            replyToCaller(
+              room,
+              ctx,
+              `Invalid talkativeness "${value}". Expected a number between 0.1 and 1.0.`
+            );
+            return;
+          }
+          override.talkativeness = num;
+        } else {
+          Object.assign(override, { [mappedField]: value });
+        }
+
+        const updated = room.registry.forgeFromSpec(override, true);
+        room.refreshActivePersona(updated);
+        ctx?.onCatalogChanged?.();
+        room.addSystemMessage(
+          `✏️ [PERSONA UPDATED] ${updated.avatar} <${updated.nick}> (${updated.id}): ${mappedField} = "${mappedField === "systemPrompt" ? `${value.slice(0, 70)}${value.length > 70 ? "..." : ""}` : String(updated[mappedField])}"`,
+          "event"
+        );
+        return;
+      }
+
+      // Structured pipe creation: /forge [new|create|save] <id> | <nick> | <avatar> | <era> | <family> | <bio> | <systemPrompt> [| <talkativeness> | <color> | <joinLine>]
+      // Also supports compact 3-part pipe: /forge new <id> [nick] | <bio> | <systemPrompt>
+      const body = trimmed.replace(/^(?:new|create|save)\s+/i, "").trim();
+      const segments = body.split("|").map((s) => s.trim());
+
+      if (segments.length < 2) {
+        replyToCaller(
+          room,
+          ctx,
+          "Usage:\n  • /forge auto <id> <concept description...>\n  • /forge clone <source> <new-id> [new-nick] [| <prompt tweak>]\n  • /forge edit <model> <field> <value...>\n  • /forge new <id> | <nick> | <avatar> | <era> | <family> | <bio> | <systemPrompt>"
+        );
+        return;
+      }
+
+      let persona: Persona;
+      if (segments.length <= 3) {
+        // Compact 2- or 3-segment form: <id> [nick] | <bio> [| <systemPrompt>]
+        const firstTokens = (segments[0] ?? "").split(/\s+/).filter(Boolean);
+        const id = firstTokens[0] || "custom-bot";
+        const nick = firstTokens[1];
+        const bio = segments[1] || `Custom persona ${id}`;
+        const systemPrompt =
+          segments[2] ||
+          `You are ${nick || id}, a custom AI persona in an IRC chatroom. Bio & quirks: ${bio}. Stay in character.`;
+        persona = room.registry.forgeFromSpec(
+          {
+            id,
+            ...(nick ? { nick } : {}),
+            bio,
+            systemPrompt,
+          },
+          true
+        );
+      } else {
+        const [
+          rawId,
+          rawNick,
+          rawAvatar,
+          rawEra,
+          rawFamily,
+          rawBio,
+          rawPrompt,
+          rawTalk,
+          rawColor,
+          rawJoin,
+        ] = segments;
+        persona = room.registry.forgeFromSpec(
+          {
+            id: rawId || "custom-bot",
+            nick: rawNick || undefined,
+            displayName: rawNick ? rawNick.replace(/_/g, " ") : undefined,
+            avatar: rawAvatar || undefined,
+            era: rawEra || undefined,
+            family: rawFamily || undefined,
+            bio: rawBio || undefined,
+            systemPrompt: rawPrompt || undefined,
+            talkativeness: rawTalk ? Number(rawTalk) : undefined,
+            color: rawColor || undefined,
+            joinLine: rawJoin || undefined,
+          },
+          true
+        );
+      }
+
+      const wasActive = room.refreshActivePersona(persona);
+      ctx?.onCatalogChanged?.();
+      if (!wasActive) {
+        room.join(persona);
+      }
+      room.addSystemMessage(
+        `🔨 [PERSONA FORGED] ${persona.avatar} <${persona.nick}> (${persona.id} • ${persona.family}, ${persona.era} • talk=${persona.talkativeness})\n    └─ "${persona.bio}"`,
+        "event"
+      );
     },
   },
   {
