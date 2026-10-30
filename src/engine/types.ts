@@ -26,6 +26,17 @@ export interface StreamTextOptions {
   onStatus?: (statusText: string) => void;
 }
 
+export interface GenerateImageOptions {
+  prompt: string;
+  model?: string;
+  signal?: AbortSignal;
+}
+
+export interface GeneratedImageResult {
+  data: string; // base64
+  mimeType: string;
+}
+
 export interface LLMProvider {
   readonly id: ProviderId;
   readonly displayName: string;
@@ -37,6 +48,7 @@ export interface LLMProvider {
   getCachedModels(): ProviderModelInfo[];
   generateJson<T>(options: GenerateJsonOptions): Promise<T>;
   streamText(options: StreamTextOptions): Promise<string>;
+  generateImage?(options: GenerateImageOptions): Promise<GeneratedImageResult | null>;
 }
 
 /**

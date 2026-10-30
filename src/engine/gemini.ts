@@ -8,6 +8,8 @@ import { GeminiProvider } from "./providers/gemini.ts";
 import { HeylookProvider } from "./providers/heylook.ts";
 import { OpenRouterProvider } from "./providers/openrouter.ts";
 import type {
+  GeneratedImageResult,
+  GenerateImageOptions,
   GenerateJsonOptions,
   LLMProvider,
   ProviderModelInfo,
@@ -331,6 +333,37 @@ export class InferenceRouter {
       ...options,
       model,
     });
+  }
+
+  public async generateImage(
+    options: GenerateImageOptions & { persona?: Persona }
+  ): Promise<GeneratedImageResult | null> {
+    const { provider } = this.resolveTarget({
+      persona: options.persona,
+      model: options.model,
+    });
+    if (provider.generateImage && provider.isConfigured()) {
+      try {
+        const res = await provider.generateImage(options);
+        if (res) return res;
+      } catch {
+        // Fall through to Gemini fallback or null
+      }
+    }
+    const gemini = this.providers.get("gemini");
+    if (
+      gemini &&
+      gemini !== provider &&
+      gemini.generateImage &&
+      gemini.isConfigured()
+    ) {
+      try {
+        return await gemini.generateImage(options);
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 }
 

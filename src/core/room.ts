@@ -9,12 +9,19 @@ import type {
   ArenaMask,
   ArenaMaskId,
   ChatMessage,
+  ChatMessageImage,
   HumanPlayer,
   Persona,
   PersonaEngineBinding,
   SimConfig,
   SimPresetId,
 } from "../types.ts";
+import {
+  buildEraStyledImagePrompt,
+  extractBotImagePrompts,
+  generateRetroSvgDataUri,
+  renderAnsiCardPreview,
+} from "./image-gen.ts";
 import { formatAffinityBadge, RelationGraph } from "./relations.ts";
 import {
   applySimConfigMutation,
@@ -93,6 +100,7 @@ export interface RoomEventCallbacks {
   onMessageClear?: () => void;
   onPresenceChange?: () => void;
   onStatusChange?: (statusText: string) => void;
+  onPadUpdate?: (text: string, updatedBy: string) => void;
 }
 
 export class Room {
@@ -101,6 +109,7 @@ export class Room {
   public vibe: string = VIBE_PRESETS.chat!;
   public config: SimConfig;
   public lore: string[] = [];
+  public sharedPad = "";
   public game: ArenaGameState | null = null;
   public scoreboard: Record<string, number> = {};
   public isReplaying = false;
@@ -196,6 +205,7 @@ export class Room {
       this.vibeKey = existingChan.vibe_key;
       this.vibe = existingChan.vibe;
       this.lore = this.db.getChannelLore(this.channelName);
+      this.sharedPad = this.db.getChannelPad(this.channelName);
       const savedBotIds = this.db.getChannelBotIds(this.channelName);
       for (const id of savedBotIds) {
         const p = this.registry.find(id);
@@ -571,6 +581,195 @@ export class Room {
     this.db?.setChannelLore(this.channelName, this.lore);
     this.callbacks?.onPresenceChange?.();
     this.notify();
+  }
+
+  public updateSharedPad(text: string, updatedBy = "User"): string {
+    this.sharedPad = text.slice(0, 4000);
+    this.db?.setChannelPad(this.channelName, this.sharedPad);
+    this.callbacks?.onPadUpdate?.(
+      this.sharedPad,
+      updatedBy.replace(/^@/, "")
+    );
+    this.callbacks?.onPresenceChange?.();
+    this.notify();
+    return this.sharedPad;
+  }
+
+  public appendSharedPad(text: string, updatedBy = "User"): string {
+    const clean = text.trim();
+    if (!clean) return this.sharedPad;
+    const next = this.sharedPad ? `${this.sharedPad}\n${clean}` : clean;
+    return this.updateSharedPad(next, updatedBy);
+  }
+
+  public async fireSharedPad(
+    actorNick = "User",
+    mode: "stage" | "chat" | "lore" = "stage"
+  ): Promise<{ ok: boolean; message: string }> {
+    const content = this.sharedPad.trim();
+    if (!content) {
+      return {
+        ok: false,
+        message:
+          'Co-op Shared Pad is currently empty! Write to it with "/pad set <text>" or from the Web Co-op Pad drawer first.',
+      };
+    }
+
+    const cleanNick = actorNick.replace(/^@/, "");
+    if (mode === "lore") {
+      this.addLore(`📝 Co-op Pad (@${cleanNick}): ${content}`);
+      this.addSystemMessage(
+        `📜 [CO-OP PAD -> LORE] @${cleanNick} committed the Shared Pad into ${this.channelName} episodic memory:\n    └─ "${content}"`,
+        "event"
+      );
+      return {
+        ok: true,
+        message: `Committed Shared Pad into ${this.channelName} lore!`,
+      };
+    }
+
+    if (mode === "chat") {
+      await this.postUserMessage(content, cleanNick);
+      return {
+        ok: true,
+        message: `Sent Shared Pad to ${this.channelName} as @${cleanNick}!`,
+      };
+    }
+
+    // Default: "stage" cue
+    this.addSystemMessage(
+      `🎬 [CO-OP STAGE CUE by @${cleanNick}] ${content}`,
+      "event"
+    );
+    await this.runRoomTurn({
+      maxSpeakers: Math.min(3, this.config.maxSpeakersPerTurn),
+      forceAllSteps: true,
+    });
+    return {
+      ok: true,
+      message: `Fired Shared Pad as a Co-op Stage Cue in ${this.channelName}!`,
+    };
+  }
+
+  public async buildImageAttachment(
+    rawPrompt: string,
+    persona?: Persona
+  ): Promise<ChatMessageImage> {
+    const cleanPrompt = rawPrompt.trim().replace(/\s+/g, " ");
+    const { eraStyle, styledPrompt } = buildEraStyledImagePrompt(
+      cleanPrompt,
+      persona
+    );
+    const ansiPreview = renderAnsiCardPreview(cleanPrompt, persona);
+
+    const cloudResult = await this.gemini.generateImage({
+      prompt: styledPrompt,
+      persona,
+    });
+
+    if (cloudResult?.data) {
+      const mediaId = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.png`;
+      try {
+        const mediaDir = path.resolve("./logs/media");
+        fs.mkdirSync(mediaDir, { recursive: true });
+        const fullFilePath = path.join(mediaDir, mediaId);
+        fs.writeFileSync(
+          fullFilePath,
+          Buffer.from(cloudResult.data, "base64")
+        );
+        return {
+          url: `/media/${mediaId}`,
+          prompt: cleanPrompt,
+          styledPrompt,
+          eraStyle,
+          mimeType: cloudResult.mimeType || "image/png",
+          ansiPreview,
+          localPath: path.relative(process.cwd(), fullFilePath),
+        };
+      } catch {
+        return {
+          url: `data:${cloudResult.mimeType || "image/png"};base64,${cloudResult.data}`,
+          prompt: cleanPrompt,
+          styledPrompt,
+          eraStyle,
+          mimeType: cloudResult.mimeType || "image/png",
+          ansiPreview,
+        };
+      }
+    }
+
+    const svgDataUri = generateRetroSvgDataUri(cleanPrompt, persona);
+    return {
+      url: svgDataUri,
+      prompt: cleanPrompt,
+      styledPrompt,
+      eraStyle,
+      mimeType: "image/svg+xml",
+      ansiPreview,
+    };
+  }
+
+  public async conjureImage(
+    rawPrompt: string,
+    options?: {
+      persona?: Persona;
+      senderNick?: string;
+      triggerReactions?: boolean;
+    }
+  ): Promise<ChatMessage> {
+    const cleanPrompt = rawPrompt.trim();
+    const persona = options?.persona;
+    const cleanHumanNick = (options?.senderNick ?? "User").replace(/^@/, "");
+
+    this.setStatus(
+      persona
+        ? `🎨 ${persona.avatar} <${persona.nick}> is rendering era artwork: "${cleanPrompt.slice(0, 40)}"...`
+        : `🎨 @${cleanHumanNick} is conjuring artwork: "${cleanPrompt.slice(0, 40)}"...`
+    );
+
+    try {
+      const image = await this.buildImageAttachment(cleanPrompt, persona);
+      const msg: ChatMessage = persona
+        ? {
+            id: this.nextId(),
+            timestamp: formatTime(),
+            kind: "model",
+            senderId: persona.id,
+            senderNick: persona.nick,
+            avatar: persona.avatar,
+            color: persona.color,
+            familyTag: `${persona.family} • ${persona.era} [🎨 IMAGINE]`,
+            text: `🎨 Conjured [${image.eraStyle}]: "${cleanPrompt}"`,
+            image,
+          }
+        : {
+            id: this.nextId(),
+            timestamp: formatTime(),
+            kind: "user",
+            senderId: `human:${cleanHumanNick}`,
+            senderNick: `@${cleanHumanNick}`,
+            color: "#50fa7b",
+            text: `🎨 /imagine ${cleanPrompt}`,
+            image,
+          };
+
+      this.recordMessage(msg, true);
+      this.addLore(
+        `🎨 Artwork in ${this.channelName} by ${persona ? `<${persona.nick}>` : `@${cleanHumanNick}`}: "${cleanPrompt}" (${image.eraStyle})`
+      );
+      this.setStatus("");
+
+      if (options?.triggerReactions !== false && this.activePersonas.length > 0) {
+        await this.runRoomTurn({
+          maxSpeakers: Math.min(2, this.config.maxSpeakersPerTurn),
+          forceAllSteps: false,
+        });
+      }
+
+      return msg;
+    } finally {
+      this.setStatus("");
+    }
   }
 
   public async summarizeChannelLore(): Promise<string[]> {
@@ -1220,7 +1419,8 @@ IMPORTANT FORMAT RULES:
 - Do NOT prefix your response with "<${speaker.nick}>:" — jump straight into your message (or optional <thinking>...</thinking> block if that fits your persona).
 - ${styleInstruction}
 - Notice which specific human (<@nick>) or AI model (<ModelNick>) spoke, and address or call them out directly by @Nick when reacting or arguing!
-- Optional: You can include [REACT: 🔥] (or 😂, 💀, 🧠, 🌀, ❤️) at the end of your reply to slap an emoji reaction onto the previous message.`;
+- Optional: You can include [REACT: 🔥] (or 😂, 💀, 🧠, 🌀, ❤️) at the end of your reply to slap an emoji reaction onto the previous message.
+- Optional: You can include [IMAGINE: <short visual description>] at the end of your reply when you want to conjure an era-styled visual artwork or diagram into the chatroom.`;
 
     const contextWindow = Math.max(6, Math.min(60, this.config.contextMessages || 24));
     const recentHistory = this.messages
@@ -1633,7 +1833,8 @@ Respond now as <${speaker.nick}>:`;
             rawAccumulated += chunk;
             const parsed = extractThinkingAndBody(rawAccumulated);
             msg.thinking = parsed.thinking;
-            msg.text = extractBotReactions(parsed.body).cleanBody;
+            const withoutReactions = extractBotReactions(parsed.body).cleanBody;
+            msg.text = extractBotImagePrompts(withoutReactions).cleanBody;
             this.callbacks?.onMessageUpsert?.(msg);
             this.notify();
           },
@@ -1641,13 +1842,29 @@ Respond now as <${speaker.nick}>:`;
 
         msg.streaming = false;
         const finalParsed = extractThinkingAndBody(rawAccumulated);
-        const { cleanBody, reactions: botReactions } = extractBotReactions(
-          finalParsed.body.trim()
-        );
+        const { cleanBody: bodyNoReact, reactions: botReactions } =
+          extractBotReactions(finalParsed.body.trim());
+        const { cleanBody, imagePrompts } =
+          extractBotImagePrompts(bodyNoReact);
         msg.thinking = finalParsed.thinking;
         msg.text =
           cleanBody ||
-          (rawAccumulated.trim() ? rawAccumulated.trim() : "...");
+          (imagePrompts[0]
+            ? `🎨 Conjured: "${imagePrompts[0]}"`
+            : rawAccumulated.trim()
+              ? rawAccumulated.trim()
+              : "...");
+
+        if (imagePrompts[0]) {
+          this.setStatus(
+            `🎨 ${publicAvatar} <${publicNick}> is rendering [${speaker.era}] art...`
+          );
+          msg.image = await this.buildImageAttachment(
+            imagePrompts[0],
+            speaker
+          );
+        }
+
         this.recordMessage(msg, true);
 
         // Apply any autonomous [REACT: <emoji> [@target]] tags emitted by the bot

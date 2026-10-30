@@ -98,6 +98,16 @@ export interface Persona {
   model?: string;
 }
 
+export interface ChatMessageImage {
+  url: string;
+  prompt: string;
+  styledPrompt: string;
+  eraStyle?: string;
+  mimeType?: string;
+  ansiPreview?: string;
+  localPath?: string;
+}
+
 export interface ChatMessage {
   id: string;
   timestamp: string;
@@ -112,6 +122,7 @@ export interface ChatMessage {
   streaming?: boolean;
   reactions?: Record<string, string[]>;
   pinned?: boolean;
+  image?: ChatMessageImage;
 }
 
 export interface TurnPlan {
@@ -127,10 +138,13 @@ export interface NextSpeakerDecision {
   reason?: string;
 }
 
+export type HumanActivity = "idle" | "typing" | "pad" | "imagine" | "arena";
+
 export interface HumanPlayer {
   nick: string;
   isHost: boolean;
   channel: string;
+  activity?: HumanActivity;
 }
 
 export interface ChannelSnapshot {
@@ -150,6 +164,7 @@ export interface ChannelSnapshot {
   personaBindings?: Record<string, PersonaEngineBinding>;
   config: SimConfig;
   lore?: string[];
+  sharedPad?: string;
   typingUsers?: string[];
   messages: ChatMessage[];
   statusText: string;
@@ -170,7 +185,9 @@ export type ClientPacket =
   | { type: "chat"; text: string }
   | { type: "command"; raw: string }
   | { type: "typing"; isTyping: boolean }
-  | { type: "react"; messageId: string; emoji: string };
+  | { type: "react"; messageId: string; emoji: string }
+  | { type: "pad:edit"; text: string }
+  | { type: "activity"; activity: HumanActivity };
 
 // Server -> Client WebSocket frames
 export type ServerPacket =
@@ -185,6 +202,12 @@ export type ServerPacket =
   | { type: "message:upsert"; channel: string; message: ChatMessage }
   | { type: "message:clear"; channel: string }
   | {
+      type: "pad:update";
+      channel: string;
+      text: string;
+      updatedBy: string;
+    }
+  | {
       type: "presence";
       channel: string;
       humans: HumanPlayer[];
@@ -192,6 +215,7 @@ export type ServerPacket =
       activePersonas: Persona[];
       personaBindings?: Record<string, PersonaEngineBinding>;
       config?: SimConfig;
+      sharedPad?: string;
       typingUsers?: string[];
       vibeKey: string;
       vibe: string;

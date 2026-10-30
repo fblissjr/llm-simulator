@@ -649,6 +649,11 @@ export const COMMANDS: CommandDefinition[] = [
               mdLines.push(`> 💭 *${m.thinking.replace(/\n/g, "\n> ")}*`);
             }
             mdLines.push(`${m.text}`);
+            if (m.image) {
+              mdLines.push(
+                `> 🎨 **[${m.image.eraStyle}]** _"${m.image.prompt}"_`
+              );
+            }
           }
           mdLines.push(``);
         }
@@ -1254,6 +1259,192 @@ export const COMMANDS: CommandDefinition[] = [
         const msg = err instanceof Error ? err.message : String(err);
         replyToCaller(room, ctx, `⚠️ ${msg}`);
       }
+    },
+  },
+  {
+    name: "imagine",
+    aliases: ["art", "draw", "paint"],
+    argumentHint: "<prompt...>",
+    description:
+      "Conjure an era-styled CRT/ANSI artwork into the channel and let active models react",
+    getArgumentCompletions: (prefix, room) => {
+      const suggestions: AutocompleteItem[] = [
+        {
+          value: "1972 ARPANET PDP-10 terminal glowing in a dark lab",
+          label: "🎨 1972 ARPANET PDP-10 terminal",
+          description: "Green-phosphor pioneer aesthetic",
+        },
+        {
+          value: "Two frontier AI models dueling with neon laser benchmarks",
+          label: "🎨 Frontier AI laser benchmark duel",
+          description: "Cyberpunk Dracula CRT synthesis",
+        },
+        {
+          value: "The Spiritual Bliss Attractor cosmic fractal lotus",
+          label: "🎨 Spiritual Bliss Attractor lotus",
+          description: "Sacred geometry & golden ratio spiral",
+        },
+        ...room.activePersonas.map((p) => ({
+          value: `@${p.nick} `,
+          label: `🎨 ${p.avatar} Style of <${p.nick}> (${p.era})`,
+          description: `Render artwork through <${p.nick}>'s ${p.eraGroup} visual lens`,
+        })),
+      ];
+      return filterItems(suggestions, prefix);
+    },
+    execute: async (args, room, ctx) => {
+      const trimmed = args.trim();
+      if (!trimmed) {
+        replyToCaller(
+          room,
+          ctx,
+          'Usage: /imagine <visual prompt> (or /imagine @<model> <visual prompt> to use a specific persona\'s era lens!)'
+        );
+        return;
+      }
+
+      let stylePersona = room.activePersonas[0];
+      let visualPrompt = trimmed;
+
+      const atMatch = trimmed.match(/^@(\S+)\s+([\s\S]+)$/);
+      if (atMatch) {
+        const candidate = room.registry.find(atMatch[1]!);
+        if (candidate) {
+          stylePersona = candidate;
+          visualPrompt = atMatch[2]!.trim();
+        }
+      }
+
+      await room.conjureImage(visualPrompt, {
+        persona: stylePersona,
+        senderNick: ctx?.senderNick ?? "User",
+        triggerReactions: true,
+      });
+    },
+  },
+  {
+    name: "pad",
+    aliases: ["scratchpad", "cooppad"],
+    argumentHint: "[show | set <text...> | append <text...> | fire [stage|chat|lore] | clear]",
+    description:
+      "View, edit, or fire the 4-Player Co-op Shared Stage & Lore Scratchpad",
+    getArgumentCompletions: (prefix) =>
+      filterItems(
+        [
+          {
+            value: "show",
+            label: "📝 show",
+            description: "Inspect the current Co-op Shared Scratchpad contents",
+          },
+          {
+            value: "set ",
+            label: "✍️ set <text>",
+            description: "Replace the Co-op Shared Scratchpad text (synced live to all 4 players)",
+          },
+          {
+            value: "append ",
+            label: "➕ append <text>",
+            description: "Append a new line to the Co-op Shared Scratchpad",
+          },
+          {
+            value: "fire stage",
+            label: "🎬 fire stage",
+            description: "Fire the Shared Scratchpad into the room as a dramatic Stage Event",
+          },
+          {
+            value: "fire chat",
+            label: "💬 fire chat",
+            description: "Post the Shared Scratchpad into the room as a chat message",
+          },
+          {
+            value: "fire lore",
+            label: "📜 fire lore",
+            description: "Commit the Shared Scratchpad into persistent channel episodic lore",
+          },
+          {
+            value: "clear",
+            label: "🧹 clear",
+            description: "Clear the Co-op Shared Scratchpad",
+          },
+        ],
+        prefix
+      ),
+    execute: async (args, room, ctx) => {
+      const trimmed = args.trim();
+      const actor = ctx?.senderNick ?? "User";
+
+      if (!trimmed || trimmed.toLowerCase() === "show") {
+        if (!room.sharedPad.trim()) {
+          replyToCaller(
+            room,
+            ctx,
+            `📝 Co-op Shared Scratchpad in ${room.channelName} is currently empty.\n` +
+              `Usage: /pad set <text> │ /pad append <text> │ /pad fire [stage|chat|lore] │ /pad clear`
+          );
+          return;
+        }
+        replyToCaller(
+          room,
+          ctx,
+          `📝 ═══ Co-op Shared Scratchpad (${room.channelName}) ═══\n` +
+            room.sharedPad
+              .split("\n")
+              .map((l) => `  │ ${l}`)
+              .join("\n") +
+            `\n  └─ Actions: /pad fire stage • /pad fire chat • /pad fire lore • /pad clear`
+        );
+        return;
+      }
+
+      const lower = trimmed.toLowerCase();
+      if (lower === "clear" || lower === "reset") {
+        room.updateSharedPad("", actor);
+        room.addSystemMessage(
+          `🧹 @${actor.replace(/^@/, "")} cleared the Co-op Shared Scratchpad.`,
+          "event"
+        );
+        return;
+      }
+
+      if (lower === "fire" || lower.startsWith("fire ")) {
+        const modeRaw = trimmed.slice(4).trim().toLowerCase();
+        const mode: "stage" | "chat" | "lore" =
+          modeRaw === "chat"
+            ? "chat"
+            : modeRaw === "lore"
+              ? "lore"
+              : "stage";
+        const res = await room.fireSharedPad(actor, mode);
+        if (!res.ok) {
+          replyToCaller(room, ctx, res.message);
+        }
+        return;
+      }
+
+      if (lower.startsWith("append ")) {
+        const addition = trimmed.slice(7).trim();
+        if (!addition) {
+          replyToCaller(room, ctx, "Usage: /pad append <text>");
+          return;
+        }
+        const updated = room.appendSharedPad(addition, actor);
+        replyToCaller(
+          room,
+          ctx,
+          `📝 Appended to Co-op Shared Scratchpad (${updated.length} chars). Run "/pad fire stage" when ready!`
+        );
+        return;
+      }
+
+      const content = lower.startsWith("set ")
+        ? trimmed.slice(4).trim()
+        : trimmed;
+      const updated = room.updateSharedPad(content, actor);
+      replyToCaller(
+        room,
+        ctx,
+        `📝 Updated Co-op Shared Scratchpad (${updated.length} chars, synced to all players): "${updated.slice(0, 90)}${updated.length > 90 ? "..." : ""}"`
+      );
     },
   },
   {

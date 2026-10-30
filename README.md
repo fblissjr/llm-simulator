@@ -63,6 +63,8 @@ bun run server --port 4321
 - `/game [start [topic] | status | reveal]` (or `/arena`): Start a Blind Turing Arena party game where models speak under `<Mystery_A>`, `<Mystery_B>`, `<Mystery_C>` masks
 - `/guess <A|B|C> <model>`: Lock in your guess for a masked model during Blind Turing Arena (`+100 pts` per match, `+50 pts` Perfect Sweep bonus)
 - `/roam [model] [#target-channel]`: Send a model wandering into another persistent channel carrying fresh cross-channel gossip & lore
+- `/imagine [@model] <prompt>` (or `/art`, `/draw`, `/paint`): Conjure an era-styled CRT/ANSI artwork into the channel (uses `gemini-nano-banana-2.1` when configured, or an era-authentic Dracula CRT SVG + ANSI half-block `▀` pixel preview offline)
+- `/pad [show | set <text> | append <text> | fire [stage|chat|lore] | clear]`: View, edit, or fire the real-time 4-Player Co-op Shared Scratchpad
 - `/think [compact|expanded|hidden]`: Toggle how `<thinking>` traces are displayed (or press `Ctrl+T` in the TUI)
 - `/export [filename]`: Export the current channel transcript and roster to `./logs/<name>.md`
 - `/replay [list | <filename> | stop]`: Play back any exported transcript from `./logs/` in Replay Theater mode

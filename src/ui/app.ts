@@ -223,6 +223,9 @@ export class ChatroomApp {
       if (s.lore) {
         this.room.lore = s.lore;
       }
+      if (s.sharedPad !== undefined) {
+        this.room.sharedPad = s.sharedPad;
+      }
       this.typingUsers = s.typingUsers ?? [];
       this.apiOnline = s.apiOnline;
       this.locked = s.locked;
@@ -258,6 +261,9 @@ export class ChatroomApp {
       }
       if (packet.config) {
         this.room.config = packet.config;
+      }
+      if (packet.sharedPad !== undefined) {
+        this.room.sharedPad = packet.sharedPad;
       }
       this.typingUsers = packet.typingUsers ?? [];
       this.apiOnline = packet.apiOnline;
@@ -305,6 +311,12 @@ export class ChatroomApp {
 
     if (packet.type === "status") {
       this.room.statusText = packet.statusText;
+      this.syncViews();
+      return;
+    }
+
+    if (packet.type === "pad:update") {
+      this.room.sharedPad = packet.text;
       this.syncViews();
       return;
     }

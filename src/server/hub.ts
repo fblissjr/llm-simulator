@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { handleSlashCommand } from "../core/commands.ts";
 import { formatTime, Room } from "../core/room.ts";
@@ -9,6 +11,7 @@ import type {
   ChannelSummary,
   ChatMessage,
   ClientPacket,
+  HumanActivity,
   HumanPlayer,
   Persona,
   ServerPacket,
@@ -23,6 +26,7 @@ export interface WsClientData {
   channel: string;
   isHost: boolean;
   isSpectator?: boolean;
+  activity?: HumanActivity;
   lastActionAt: number;
 }
 
@@ -159,6 +163,15 @@ export class ChannelHub {
           });
         }
 
+        if (url.pathname.startsWith("/media/")) {
+          const safeFile = path.basename(url.pathname.slice(7));
+          const mediaPath = path.resolve("./logs/media", safeFile);
+          if (fs.existsSync(mediaPath)) {
+            return new Response(Bun.file(mediaPath));
+          }
+          return new Response("Media not found", { status: 404 });
+        }
+
         return new Response("Not Found", { status: 404 });
       },
       websocket: {
@@ -252,6 +265,14 @@ export class ChannelHub {
             statusText,
           });
         },
+        onPadUpdate: (text, updatedBy) => {
+          this.broadcastToChannel(channelName, {
+            type: "pad:update",
+            channel: channelName,
+            text,
+            updatedBy,
+          });
+        },
       },
     });
 
@@ -281,13 +302,24 @@ export class ChannelHub {
   }
 
   private getChannelHumans(channelName: string): HumanPlayer[] {
+    const room = this.rooms.get(channelName);
+    const typingSet = new Set(
+      (room?.getTypingHumans() ?? []).map((n) => n.toLowerCase())
+    );
     const list: HumanPlayer[] = [];
     for (const ws of this.clients.values()) {
       if (ws.data.channel === channelName && !ws.data.isSpectator) {
+        const isTyping = typingSet.has(ws.data.nick.toLowerCase());
+        const activity: HumanActivity = isTyping
+          ? "typing"
+          : room?.game?.active
+            ? (ws.data.activity ?? "arena")
+            : (ws.data.activity ?? "idle");
         list.push({
           nick: ws.data.nick,
           isHost: ws.data.isHost,
           channel: ws.data.channel,
+          activity,
         });
       }
     }
@@ -320,6 +352,7 @@ export class ChannelHub {
       personaBindings: this.gemini.getAllPersonaBindings(),
       config: room.config,
       lore: room.lore,
+      sharedPad: room.sharedPad,
       typingUsers: room.getTypingHumans(),
       messages: room.messages.slice(-80),
       statusText: room.statusText,
@@ -384,6 +417,7 @@ export class ChannelHub {
       activePersonas: room.activePersonas,
       personaBindings: this.gemini.getAllPersonaBindings(),
       config: room.config,
+      sharedPad: room.sharedPad,
       typingUsers: room.getTypingHumans(),
       vibeKey: room.vibeKey,
       vibe: room.vibe,
@@ -482,8 +516,31 @@ export class ChannelHub {
 
     if (packet.type === "typing") {
       if (!ws.data.isSpectator) {
+        ws.data.activity = packet.isTyping ? "typing" : "idle";
         room.markHumanTyping(ws.data.nick, Boolean(packet.isTyping));
       }
+      return;
+    }
+
+    if (packet.type === "activity") {
+      if (!ws.data.isSpectator) {
+        ws.data.activity = packet.activity;
+        this.syncChannelHumans(room.channelName);
+        this.broadcastPresence(room.channelName);
+      }
+      return;
+    }
+
+    if (packet.type === "pad:edit") {
+      if (ws.data.isSpectator) {
+        this.sendNotice(
+          ws,
+          "👁️ Spectator Mode: Co-op Shared Scratchpad is read-only while spectating."
+        );
+        return;
+      }
+      ws.data.activity = "pad";
+      room.updateSharedPad(packet.text ?? "", ws.data.nick);
       return;
     }
 

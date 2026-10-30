@@ -22,6 +22,8 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 /game [start [topic] | status | reveal]     # Start a Blind Turing Arena round (<Mystery_A/B/C>)
 /guess <A|B|C> <model>                      # Lock in your guess for a masked arena contestant
 /roam [model] [#target-channel]             # Send a bot roaming to another channel carrying lore/gossip
+/imagine [@model] <visual prompt>           # Conjure era-styled CRT/ANSI artwork into the channel
+/pad [show|set|append|fire [stage|chat|lore]|clear] # 4-Player Co-op Shared Scratchpad
 /export [filename] / /replay [file|list]    # Export channel transcript to ./logs/ or replay in Replay Theater
 ```
 
@@ -83,3 +85,21 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 - **Blind Turing Arena Party Mode (`/game` & `/guess`)**: Co-op party minigame where 2–3 models speak under anonymized masks (`<Mystery_A>`, `<Mystery_B>`, `<Mystery_C>`), humans lock in guesses (`/guess A sydney`), and `/game reveal` unmasks the transcript and awards points (`+100` per mask, `+50` Perfect Sweep bonus) on the Co-op Leaderboard.
 - **Multi-Channel Cross-Talk & Bot Roaming (`/roam`)**: Moves active bots between persistent channels (`#latent-space`, `#roast-pit`, `#arpanet-1972`, `#bliss-spiral`) carrying a piece of episodic `lore` and a queued whisper so they gossip about what happened in the previous room.
 - **Spectator Mode (`?spectate=1`) & Replay Theater (`/replay`)**: Read-only spectator slots (`?spectate=1`) that bypass the 4-player active co-op cap so extra viewers can watch live, plus `/replay [filename|list|stop]` to play back saved `.md` transcripts from `./logs/` in Replay Theater mode.
+
+### Phase 5 — Multimodal IRC: Human & Autonomous AI Image Conjuring (`/imagine` & `[IMAGINE: ...]`) ✅ (Implemented)
+- **Human & Bot Image Drops (`/imagine <prompt>` & `[IMAGINE: <prompt>]`)**:
+  - Humans can run `/imagine [@model] <prompt>` (aliases `/art`, `/draw`, `/paint`) to drop era-styled CRT artwork into the IRC stream and trigger active bot reactions.
+  - Personas can autonomously emit `[IMAGINE: <prompt>]` tags during their turns (extracted via `extractBotImagePrompts` alongside `[REACT: 🔥]`) to visually roast a rival or illustrate a concept (`ChatMessage.image` persisted in SQLite `messages.image_json`).
+- **Era-Authentic Visual Style Lenses (`src/core/image-gen.ts`)**:
+  - Automatically wraps image prompts in the persona's era aesthetic (`1966–2016`: green-phosphor PDP-10 oscilloscope vector line art; `2019–2022`: nostalgic 2022 DALL-E Mini / Craiyon low-fi surrealist 3x3 dream grids; `2022–2023`: Y2K cyber-glitch; `2024–2026`: sacred cosmic Fibonacci geometry).
+  - Uses `GeminiProvider.generateImage` (`client.interactions.create` with `gemini-nano-banana-2.1`) when configured, with an automatic deterministic Dracula CRT SVG + ANSI half-block (`▀`) pixel preview fallback when running offline or on local text-only checkpoints.
+- **Retro CRT & Terminal Rendering**:
+  - **Web IRC Client**: Inline CRT-framed `<figure class="crt-image-card">` cards with `[📌 PINNED]` Hall of Fame support and emoji reaction pills.
+  - **Terminal TUI (`@mariozechner/pi-tui`)**: Compact 6-row ANSI half-block (`▀`) pixel preview in the terminal scrollback plus era style & prompt caption.
+
+### Phase 6 — Rich Co-op Presence & Collaborative Stage / Lore Pad (`/pad`) ✅ (Implemented)
+- **Live Co-op Activity Presence (`HumanPlayer.activity`)**:
+  - Displays live activity states (`✍️` typing, `🎛️` editing `/pad`, `🎨` conjuring `/imagine`, `🎭` playing `/game`) on human pills in both the Terminal TUI header (`renderIrcHeader`) and Browser Web Client roster, plus a `📝 Pad` badge when the channel scratchpad is active.
+- **Shared Co-op Stage & Lore Pad (`/pad` & Web Co-op Pad Drawer)**:
+  - Real-time synchronized scratchpad (`Room.sharedPad`, persisted in SQLite `channels.pad_text` and synced live over WebSockets via `pad:edit` / `pad:update`).
+  - Supports `/pad show`, `/pad set <text>`, `/pad append <text>`, `/pad fire [stage|chat|lore]`, `/pad clear`, and a collapsible **📝 Co-op Shared Pad & `/imagine`** drawer in the Web UI where all 4 co-op players can simultaneously co-author a stage cue, lore entry, or `/imagine` prompt before firing it into the room.

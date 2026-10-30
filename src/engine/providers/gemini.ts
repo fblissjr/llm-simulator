@@ -1,5 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import {
+  type GeneratedImageResult,
+  type GenerateImageOptions,
   type GenerateJsonOptions,
   type LLMProvider,
   parseJsonLoose,
@@ -21,6 +23,13 @@ const GEMINI_BUILTIN_MODELS: ProviderModelInfo[] = [
     provider: "gemini",
     capabilities: ["chat", "json_schema"],
     description: "Ultra-low-latency Room Director & JSON synthesizer",
+  },
+  {
+    id: "gemini-nano-banana-2.1",
+    name: "Gemini Nano Banana 2.1",
+    provider: "gemini",
+    capabilities: ["image"],
+    description: "Fast multimodal image generator for /imagine & bot art",
   },
 ];
 
@@ -125,5 +134,35 @@ export class GeminiProvider implements LLMProvider {
       }
     }
     return fullText;
+  }
+
+  public async generateImage(
+    options: GenerateImageOptions
+  ): Promise<GeneratedImageResult | null> {
+    const client = this.getClient();
+    const interaction = await client.interactions.create(
+      {
+        model:
+          options.model ||
+          process.env.GEMINI_IMAGE_MODEL ||
+          "gemini-nano-banana-2.1",
+        input: options.prompt,
+        store: false,
+      },
+      options.signal ? { signal: options.signal } : undefined
+    );
+
+    const outImg = (
+      interaction as unknown as {
+        output_image?: { data?: string; mime_type?: string };
+      }
+    ).output_image;
+    if (outImg?.data) {
+      return {
+        data: outImg.data,
+        mimeType: outImg.mime_type || "image/png",
+      };
+    }
+    return null;
   }
 }

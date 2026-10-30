@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import * as path from "node:path";
 import type {
   ChatMessage,
+  ChatMessageImage,
   Persona,
   PersonaEngineBinding,
   PersonaRelation,
@@ -14,6 +15,7 @@ export interface StoredChannelRow {
   vibe: string;
   config_json: string | null;
   lore_json: string | null;
+  pad_text: string | null;
   updated_at: number;
 }
 
@@ -34,6 +36,7 @@ export class SimDatabase {
         vibe TEXT NOT NULL,
         config_json TEXT,
         lore_json TEXT,
+        pad_text TEXT,
         updated_at INTEGER NOT NULL
       );
 
@@ -59,7 +62,8 @@ export class SimDatabase {
         thinking TEXT,
         text TEXT NOT NULL,
         reactions_json TEXT,
-        pinned INTEGER DEFAULT 0
+        pinned INTEGER DEFAULT 0,
+        image_json TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_messages_channel_seq
@@ -98,8 +102,10 @@ export class SimDatabase {
     for (const sql of [
       "ALTER TABLE channels ADD COLUMN config_json TEXT;",
       "ALTER TABLE channels ADD COLUMN lore_json TEXT;",
+      "ALTER TABLE channels ADD COLUMN pad_text TEXT;",
       "ALTER TABLE messages ADD COLUMN reactions_json TEXT;",
       "ALTER TABLE messages ADD COLUMN pinned INTEGER DEFAULT 0;",
+      "ALTER TABLE messages ADD COLUMN image_json TEXT;",
     ]) {
       try {
         this.db.exec(sql);
@@ -111,7 +117,7 @@ export class SimDatabase {
 
   public getChannel(name: string): StoredChannelRow | null {
     const stmt = this.db.query<StoredChannelRow, [string]>(
-      "SELECT name, vibe_key, vibe, config_json, lore_json, updated_at FROM channels WHERE name = ?"
+      "SELECT name, vibe_key, vibe, config_json, lore_json, pad_text, updated_at FROM channels WHERE name = ?"
     );
     return stmt.get(name) ?? null;
   }
@@ -121,7 +127,8 @@ export class SimDatabase {
     vibeKey: string,
     vibe: string,
     config?: SimConfig,
-    lore?: string[]
+    lore?: string[],
+    padText?: string
   ): void {
     const existing = this.getChannel(name);
     const configJson = config
@@ -130,17 +137,37 @@ export class SimDatabase {
     const loreJson = lore
       ? JSON.stringify(lore)
       : (existing?.lore_json ?? null);
+    const padVal =
+      padText !== undefined ? padText : (existing?.pad_text ?? null);
     this.db.run(
-      `INSERT INTO channels (name, vibe_key, vibe, config_json, lore_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO channels (name, vibe_key, vibe, config_json, lore_json, pad_text, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(name) DO UPDATE SET
          vibe_key = excluded.vibe_key,
          vibe = excluded.vibe,
          config_json = COALESCE(excluded.config_json, channels.config_json),
          lore_json = COALESCE(excluded.lore_json, channels.lore_json),
+         pad_text = COALESCE(excluded.pad_text, channels.pad_text),
          updated_at = excluded.updated_at`,
-      [name, vibeKey, vibe, configJson, loreJson, Date.now()]
+      [name, vibeKey, vibe, configJson, loreJson, padVal, Date.now()]
     );
+  }
+
+  public setChannelPad(name: string, padText: string): void {
+    const existing = this.getChannel(name);
+    this.upsertChannel(
+      name,
+      existing?.vibe_key ?? "chat",
+      existing?.vibe ?? "",
+      undefined,
+      undefined,
+      padText
+    );
+  }
+
+  public getChannelPad(name: string): string {
+    const row = this.getChannel(name);
+    return row?.pad_text ?? "";
   }
 
   public setChannelLore(name: string, lore: string[]): void {
@@ -212,17 +239,19 @@ export class SimDatabase {
       msg.reactions && Object.keys(msg.reactions).length > 0
         ? JSON.stringify(msg.reactions)
         : null;
+    const imageJson = msg.image ? JSON.stringify(msg.image) : null;
     this.db.run(
       `INSERT INTO messages (
         id, channel_name, timestamp, created_at, kind,
         sender_id, sender_nick, avatar, color, family_tag, thinking, text,
-        reactions_json, pinned
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        reactions_json, pinned, image_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         thinking = excluded.thinking,
         text = excluded.text,
         reactions_json = excluded.reactions_json,
-        pinned = excluded.pinned`,
+        pinned = excluded.pinned,
+        image_json = COALESCE(excluded.image_json, messages.image_json)`,
       [
         msg.id,
         channelName,
@@ -238,6 +267,7 @@ export class SimDatabase {
         msg.text,
         reactionsJson,
         msg.pinned ? 1 : 0,
+        imageJson,
       ]
     );
   }
@@ -258,10 +288,11 @@ export class SimDatabase {
           text: string;
           reactions_json: string | null;
           pinned: number | null;
+          image_json: string | null;
         },
         [string, number]
       >(
-        `SELECT id, timestamp, kind, sender_id, sender_nick, avatar, color, family_tag, thinking, text, reactions_json, pinned
+        `SELECT id, timestamp, kind, sender_id, sender_nick, avatar, color, family_tag, thinking, text, reactions_json, pinned, image_json
          FROM (
            SELECT * FROM messages WHERE channel_name = ? ORDER BY seq DESC LIMIT ?
          )
@@ -278,6 +309,14 @@ export class SimDatabase {
           reactions = undefined;
         }
       }
+      let image: ChatMessageImage | undefined;
+      if (r.image_json) {
+        try {
+          image = JSON.parse(r.image_json) as ChatMessageImage;
+        } catch {
+          image = undefined;
+        }
+      }
       return {
         id: r.id,
         timestamp: r.timestamp,
@@ -292,6 +331,7 @@ export class SimDatabase {
         streaming: false,
         reactions,
         pinned: Boolean(r.pinned),
+        image,
       };
     });
   }
@@ -312,7 +352,7 @@ export class SimDatabase {
   public listChannelRows(): StoredChannelRow[] {
     return this.db
       .query<StoredChannelRow, []>(
-        "SELECT name, vibe_key, vibe, config_json, lore_json, updated_at FROM channels ORDER BY name ASC"
+        "SELECT name, vibe_key, vibe, config_json, lore_json, pad_text, updated_at FROM channels ORDER BY name ASC"
       )
       .all();
   }

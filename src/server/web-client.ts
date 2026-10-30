@@ -198,6 +198,53 @@ export function renderWebClientHtml(): string {
     }
     .msg.event { color: var(--yellow); }
     .msg.system { color: var(--cyan); }
+    figure.crt-image-card {
+      margin: 8px 0 4px 10px;
+      max-width: 460px;
+      background: #12131a;
+      border: 1px solid var(--purple);
+      border-radius: 6px;
+      padding: 6px;
+      box-shadow: 0 0 14px rgba(189, 147, 249, 0.16);
+    }
+    figure.crt-image-card img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    figure.crt-image-card figcaption {
+      margin-top: 5px;
+      font-size: 11px;
+      color: var(--yellow);
+    }
+    .coop-pad-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: min(560px, 88vw);
+    }
+    textarea#coop-pad {
+      width: 100%;
+      min-height: 62px;
+      background: #12131a;
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-family: inherit;
+      font-size: 12px;
+      resize: vertical;
+    }
+    textarea#coop-pad:focus {
+      outline: none;
+      border-color: var(--green);
+    }
+    .pad-meta {
+      font-size: 11px;
+      color: var(--muted);
+    }
     footer {
       display: flex;
       flex-direction: column;
@@ -381,6 +428,21 @@ export function renderWebClientHtml(): string {
           <button type="button" class="quick-btn" data-cmd="/replay">🎬 /replay last log</button>
         </div>
       </details>
+
+      <details class="control-drawer" name="room-drawer" id="coop-pad-drawer">
+        <summary>📝 Co-op Shared Pad &amp; /imagine</summary>
+        <div class="coop-pad-wrap">
+          <textarea id="coop-pad" placeholder="Shared 4-Player Scratchpad — type here with your co-op crew to draft a stage cue, lore entry, or /imagine art prompt in real time..."></textarea>
+          <div class="drawer-controls">
+            <button type="button" class="quick-btn" data-cmd="/pad fire stage">🎬 Fire Stage Cue</button>
+            <button type="button" class="quick-btn" data-cmd="/pad fire chat">💬 Send as Chat</button>
+            <button type="button" class="quick-btn" data-cmd="/pad fire lore">📜 Commit to Lore</button>
+            <button type="button" class="quick-btn" id="pad-imagine-btn">🎨 /imagine from Pad</button>
+            <button type="button" class="quick-btn" data-cmd="/pad clear">🧹 Clear Pad</button>
+            <span class="pad-meta" id="pad-status">Synced across all 4 players</span>
+          </div>
+        </div>
+      </details>
     </div>
 
     <div class="quick-bar">
@@ -424,6 +486,9 @@ export function renderWebClientHtml(): string {
     const selfNickEl = document.getElementById("self-nick-label");
     const formEl = document.getElementById("chat-form");
     const inputEl = document.getElementById("chat-input");
+    const coopPadEl = document.getElementById("coop-pad");
+    const padStatusEl = document.getElementById("pad-status");
+    const padImagineBtn = document.getElementById("pad-imagine-btn");
 
     let messages = new Map();
     let currentConfig = { preset: "lively", ambientEnabled: true, thinkingDisplay: "compact" };
@@ -461,6 +526,18 @@ export function renderWebClientHtml(): string {
       return '<div class="msg-actions">' + btns.join("") + '</div>';
     }
 
+    function renderImageCard(m) {
+      if (!m.image || !m.image.url) return "";
+      let imgSrc = String(m.image.url);
+      if (imgSrc.startsWith("/media/") && key) {
+        imgSrc += (imgSrc.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(key);
+      }
+      return '<figure class="crt-image-card">' +
+        '<img src="' + escapeHtml(imgSrc) + '" alt="' + escapeHtml(m.image.prompt) + '" loading="lazy" />' +
+        '<figcaption>🎨 [' + escapeHtml(m.image.eraStyle) + '] &ldquo;' + escapeHtml(m.image.prompt) + '&rdquo;</figcaption>' +
+      '</figure>';
+    }
+
     function renderMessageNode(m) {
       let el = document.getElementById("msg-" + m.id);
       const isNew = !el;
@@ -471,6 +548,7 @@ export function renderWebClientHtml(): string {
       }
       el.className = "msg " + m.kind;
       const pinHtml = m.pinned ? '<span class="pin-badge">[📌 PINNED]</span>' : "";
+      const imgHtml = renderImageCard(m);
       const rxHtml = renderReactionBar(m);
 
       if (m.kind === "event") {
@@ -478,9 +556,9 @@ export function renderWebClientHtml(): string {
       } else if (m.kind === "system") {
         el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <strong>[SYS]</strong> ' + formatInlineMarkdown(m.text);
       } else if (m.kind === "emote") {
-        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span>' + pinHtml + ' * ' + escapeHtml(m.senderNick) + ' ' + formatInlineMarkdown(m.text) + rxHtml;
+        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span>' + pinHtml + ' * ' + escapeHtml(m.senderNick) + ' ' + formatInlineMarkdown(m.text) + imgHtml + rxHtml;
       } else if (m.kind === "user") {
-        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(m.senderNick) + '&gt;</span>' + pinHtml + ' ' + formatInlineMarkdown(m.text) + rxHtml;
+        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(m.senderNick) + '&gt;</span>' + pinHtml + ' ' + formatInlineMarkdown(m.text) + imgHtml + rxHtml;
       } else {
         const col = m.color || "#8be9fd";
         el.style.setProperty("--persona-color", col);
@@ -496,6 +574,7 @@ export function renderWebClientHtml(): string {
           '<div><span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(av + m.senderNick) + '&gt;</span>' + fam + pinHtml + '</div>' +
           thinkHtml +
           '<div class="body">' + formatInlineMarkdown(m.text || (m.streaming ? "..." : "")) + cursor + '</div>' +
+          imgHtml +
           rxHtml;
       }
       if (isNew || m.streaming) {
@@ -520,9 +599,13 @@ export function renderWebClientHtml(): string {
       countEl.textContent = "4-Player DOOM Co-op [" + state.humans.length + "/" + (state.maxHumans || 4) + "]" + specSuffix;
 
       const bindings = state.personaBindings || {};
-      const humanPills = state.humans.map(h =>
-        '<button type="button" class="pill human" data-mention="@' + escapeHtml(h.nick) + '">@' + escapeHtml(h.nick) + (h.isHost ? " ★" : "") + '</button>'
-      );
+      if (typeof state.sharedPad === "string" && coopPadEl && document.activeElement !== coopPadEl) {
+        coopPadEl.value = state.sharedPad;
+      }
+      const humanPills = state.humans.map(h => {
+        const actIcon = h.activity === "typing" ? " ✍️" : h.activity === "pad" ? " 🎛️" : h.activity === "imagine" ? " 🎨" : h.activity === "arena" ? " 🎭" : "";
+        return '<button type="button" class="pill human" data-mention="@' + escapeHtml(h.nick) + '">@' + escapeHtml(h.nick) + (h.isHost ? " ★" : "") + actIcon + '</button>';
+      });
       const botPills = state.activePersonas.map(p => {
         const b = bindings[String(p.id).toLowerCase()];
         const viaBadge = b ? '<span class="pill-via">(' + escapeHtml(b.provider + ":" + b.model) + ')</span>' : "";
@@ -569,6 +652,33 @@ export function renderWebClientHtml(): string {
       }
     });
 
+    if (coopPadEl) {
+      coopPadEl.addEventListener("focus", () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "activity", activity: "pad" }));
+        }
+      });
+      coopPadEl.addEventListener("blur", () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "activity", activity: "idle" }));
+        }
+      });
+      coopPadEl.addEventListener("input", () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "pad:edit", text: coopPadEl.value }));
+        }
+      });
+    }
+
+    if (padImagineBtn && coopPadEl) {
+      padImagineBtn.addEventListener("click", () => {
+        const promptText = coopPadEl.value.trim() || inputEl.value.trim() || "1972 ARPANET terminal glowing in #latent-space";
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "command", raw: "/imagine " + promptText }));
+        }
+      });
+    }
+
     ws.onmessage = (ev) => {
       const pkt = JSON.parse(ev.data);
       if (pkt.type === "sync") {
@@ -610,6 +720,13 @@ export function renderWebClientHtml(): string {
         }
       } else if (pkt.type === "status") {
         statusEl.textContent = pkt.statusText || "Ready — Type a message or /command";
+      } else if (pkt.type === "pad:update") {
+        if (coopPadEl && document.activeElement !== coopPadEl) {
+          coopPadEl.value = pkt.text || "";
+        }
+        if (padStatusEl) {
+          padStatusEl.textContent = "Updated by @" + (pkt.updatedBy || "player");
+        }
       } else if (pkt.type === "nick:ack") {
         selfNickEl.textContent = "@" + pkt.nick + ">";
         localStorage.setItem("llm_sim_nick", pkt.nick);

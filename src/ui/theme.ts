@@ -79,11 +79,21 @@ export function renderIrcHeader(
   const humanTags = humanList
     .map((h) => {
       const star = h.isHost ? "★" : "";
+      const actIcon =
+        h.activity === "typing"
+          ? "✍️"
+          : h.activity === "pad"
+            ? "🎛️"
+            : h.activity === "imagine"
+              ? "🎨"
+              : h.activity === "arena"
+                ? "🎭"
+                : "";
       const isMe =
         opts?.selfNick && h.nick.toLowerCase() === opts.selfNick.toLowerCase();
       return isMe
-        ? chalk.hex("#50fa7b").bold(`@${h.nick}${star}`)
-        : chalk.hex("#8be9fd")(`@${h.nick}${star}`);
+        ? chalk.hex("#50fa7b").bold(`@${h.nick}${star}${actIcon}`)
+        : chalk.hex("#8be9fd")(`@${h.nick}${star}${actIcon}`);
     })
     .join("  ");
 
@@ -103,7 +113,10 @@ export function renderIrcHeader(
     opts?.spectatorCount && opts.spectatorCount > 0
       ? ` ${chalk.hex("#bd93f9")(`👁️ ${opts.spectatorCount}`)}`
       : "";
-  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${paceBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)}${specBadge} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
+  const padBadge = room.sharedPad.trim()
+    ? ` ${chalk.hex("#f1fa8c")("📝 Pad")}`
+    : "";
+  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${paceBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)}${specBadge}${padBadge} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
   const rosterLine = `${chalk.hex("#6272a4")("╠══")} ${chalk.dim("Humans:")} ${humanTags} ${chalk.hex("#6272a4")("│")} ${chalk.dim(`AIs [${room.activePersonas.length}]:`)} ${botTags}`;
 
   const inviteInfo = opts?.shareUrl
@@ -138,12 +151,25 @@ function formatMessageFooter(msg: ChatMessage): string {
   return `\n    ${rx.join("   ")}`;
 }
 
+function formatImageBlock(msg: ChatMessage): string {
+  if (!msg.image) return "";
+  const lines: string[] = [];
+  if (msg.image.ansiPreview) {
+    lines.push(msg.image.ansiPreview);
+  }
+  lines.push(
+    `    ${chalk.hex("#bd93f9").bold(`[🎨 ${msg.image.eraStyle}]`)} ${chalk.hex("#f1fa8c")(`"${msg.image.prompt}"`)}`
+  );
+  return `\n${lines.join("\n")}`;
+}
+
 export function formatChatMessage(
   msg: ChatMessage,
   opts?: { thinkingDisplay?: ThinkingDisplayMode }
 ): string {
   const ts = chalk.hex("#6272a4")(`[${msg.timestamp}]`);
   const pinBadge = msg.pinned ? ` ${chalk.hex("#ffb86c").bold("[📌 PINNED]")}` : "";
+  const imgBlock = formatImageBlock(msg);
   const rxFooter = formatMessageFooter(msg);
 
   if (msg.kind === "event") {
@@ -158,14 +184,14 @@ export function formatChatMessage(
     const nickTag = msg.senderNick.startsWith("@")
       ? msg.senderNick
       : `@${msg.senderNick}`;
-    return `${ts}${pinBadge} ${chalk.hex(msg.color || "#ff79c6").italic(`* ${nickTag} ${msg.text}`)}${rxFooter}`;
+    return `${ts}${pinBadge} ${chalk.hex(msg.color || "#ff79c6").italic(`* ${nickTag} ${msg.text}`)}${imgBlock}${rxFooter}`;
   }
 
   if (msg.kind === "user") {
     const nickTag = msg.senderNick.startsWith("@")
       ? msg.senderNick
       : `@${msg.senderNick}`;
-    return `${ts}${pinBadge} ${chalk.hex("#50fa7b").bold(`<${nickTag}>`)} ${chalk.hex("#f8f8f2")(msg.text)}${rxFooter}`;
+    return `${ts}${pinBadge} ${chalk.hex("#50fa7b").bold(`<${nickTag}>`)} ${chalk.hex("#f8f8f2")(msg.text)}${imgBlock}${rxFooter}`;
   }
 
   const nickColor = chalk.hex(msg.color || "#8be9fd").bold;
@@ -206,5 +232,5 @@ export function formatChatMessage(
     parts.push(`  ${chalk.dim("...")}${streamingCursor}`);
   }
 
-  return `${parts.join("\n")}${rxFooter}`;
+  return `${parts.join("\n")}${imgBlock}${rxFooter}`;
 }
