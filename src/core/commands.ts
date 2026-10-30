@@ -1,11 +1,18 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type {
   AutocompleteItem,
   AutocompleteProvider,
   AutocompleteSuggestions,
   SlashCommand,
 } from "@mariozechner/pi-tui";
-import type { Persona } from "../types.ts";
+import type { Persona, SimPresetId } from "../types.ts";
 import { type Room, VIBE_PRESETS } from "./room.ts";
+import {
+  BUILTIN_SCENARIOS,
+  SIM_PRESETS,
+  SIM_VARIABLE_DESCRIPTORS,
+} from "./sim-config.ts";
 
 export interface CommandExecutionContext {
   senderNick?: string;
@@ -115,6 +122,7 @@ export const COMMANDS: CommandDefinition[] = [
         return;
       }
 
+      let newlyJoinedCount = 0;
       for (const token of rawTokens) {
         const existing = room.registry.find(token);
         if (existing) {
@@ -124,8 +132,8 @@ export const COMMANDS: CommandDefinition[] = [
               ctx,
               `${existing.avatar} ${existing.nick} is already in ${room.channelName}.`
             );
-          } else {
-            room.join(existing);
+          } else if (room.join(existing)) {
+            newlyJoinedCount += 1;
           }
           continue;
         }
@@ -150,13 +158,25 @@ export const COMMANDS: CommandDefinition[] = [
           room.statusText = "";
           room.callbacks?.onStatusChange?.("");
           ctx?.onCatalogChanged?.();
-          room.join(persona);
+          if (room.join(persona)) {
+            newlyJoinedCount += 1;
+          }
         } catch (err) {
           room.statusText = "";
           room.callbacks?.onStatusChange?.("");
           const msg = err instanceof Error ? err.message : String(err);
           replyToCaller(room, ctx, `⚠️ Failed to forge persona "${token}": ${msg}`);
         }
+      }
+
+      if (
+        newlyJoinedCount > 0 &&
+        room.activePersonas.length > 1 &&
+        room.config.joinReactionProb > 0 &&
+        room.gemini.isConfigured() &&
+        Math.random() < room.config.joinReactionProb
+      ) {
+        await room.runRoomTurn({ maxSpeakers: 1 });
       }
     },
   },
@@ -246,8 +266,399 @@ export const COMMANDS: CommandDefinition[] = [
     },
   },
   {
+    name: "config",
+    aliases: ["sim", "pace"],
+    argumentHint: "[preset <name> | set <key> <val> | reset]",
+    description:
+      "Inspect or tune granular chatroom simulation variables & pacing presets (manual, chill, lively, banter, chaos)",
+    hostOnlyWhenLocked: true,
+    getArgumentCompletions: (prefix, room) => {
+      const trimmed = prefix.trimStart();
+      const parts = trimmed.split(/\s+/).filter(Boolean);
+
+      if (!trimmed || (parts.length === 1 && !trimmed.endsWith(" "))) {
+        const items: AutocompleteItem[] = [
+          ...Object.values(SIM_PRESETS).map((p) => ({
+            value: `preset ${p.id}`,
+            label: `${p.label}${room.config.preset === p.id ? " ● [ACTIVE]" : ""}`,
+            description: p.description,
+          })),
+          {
+            value: "reset",
+            label: "🔄 reset",
+            description: "Reset room simulation config to default 'lively' preset",
+          },
+          ...SIM_VARIABLE_DESCRIPTORS.map((d) => ({
+            value: `set ${d.key} `,
+            label: `⚙️ set ${d.key} (current: ${String(room.config[d.key])})`,
+            description: d.description,
+          })),
+        ];
+        return filterItems(items, trimmed);
+      }
+
+      if (parts[0] === "preset") {
+        const sub = parts[1] ?? "";
+        return filterItems(
+          Object.values(SIM_PRESETS).map((p) => ({
+            value: `preset ${p.id}`,
+            label: p.label,
+            description: p.description,
+          })),
+          `preset ${sub}`
+        );
+      }
+
+      if (parts[0] === "set") {
+        if (parts.length === 1 || (parts.length === 2 && !trimmed.endsWith(" "))) {
+          const keyPrefix = parts[1] ?? "";
+          return filterItems(
+            SIM_VARIABLE_DESCRIPTORS.map((d) => ({
+              value: `set ${d.key} `,
+              label: `⚙️ ${d.key} = ${String(room.config[d.key])}`,
+              description: d.description,
+            })),
+            `set ${keyPrefix}`
+          );
+        }
+        const targetKey = parts[1]!;
+        const desc = SIM_VARIABLE_DESCRIPTORS.find(
+          (d) => d.key.toLowerCase() === targetKey.toLowerCase()
+        );
+        if (!desc) return null;
+        if (desc.type === "boolean") {
+          return [
+            {
+              value: `set ${desc.key} true`,
+              label: "true",
+              description: `Enable ${desc.key}`,
+            },
+            {
+              value: `set ${desc.key} false`,
+              label: "false",
+              description: `Disable ${desc.key}`,
+            },
+          ];
+        }
+        if (desc.type === "enum" && desc.enumValues) {
+          return desc.enumValues.map((v) => ({
+            value: `set ${desc.key} ${v}`,
+            label: v,
+            description: desc.description,
+          }));
+        }
+      }
+      return null;
+    },
+    execute: (args, room, ctx) => {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      if (parts.length === 0) {
+        const c = room.config;
+        const lines = [
+          `═══ Simulation Configuration for ${room.channelName} [Preset: ${c.preset.toUpperCase()}] ═══`,
+          `  • Turn Chaining:     minSpeakersPerTurn=${c.minSpeakersPerTurn} │ maxSpeakersPerTurn=${c.maxSpeakersPerTurn} │ continuationProb=${c.continuationProb} │ continuationDecay=${c.continuationDecay}`,
+          `  • Speaker Selection: directorMode=${c.directorMode} │ talkativenessWeight=${c.talkativenessWeight} │ recencyPenalty=${c.recencyPenalty} │ botMentionChaining=${c.botMentionChaining}`,
+          `  • Organic Pacing:    readingDelayMs=${c.readingDelayMs}ms │ interSpeakerDelayMs=${c.interSpeakerDelayMs}ms │ humanDebounceMs=${c.humanDebounceMs}ms │ humanInterruptMode=${c.humanInterruptMode}`,
+          `  • Ambient Life:      ambientEnabled=${c.ambientEnabled} │ ambientIdleSec=${c.ambientIdleSec}s │ ambientIntervalSec=${c.ambientIntervalSec}s │ ambientProb=${c.ambientProb} │ ambientMaxBurst=${c.ambientMaxBurst} │ ambientMaxConsecutive=${c.ambientMaxConsecutive} (used: ${room.ambientConsecutiveCount}/${c.ambientMaxConsecutive})`,
+          `  • Social & Format:   joinReactionProb=${c.joinReactionProb} │ contextMessages=${c.contextMessages} │ responseStyle=${c.responseStyle} │ thinkingDisplay=${c.thinkingDisplay}`,
+          "",
+          "Presets: /config preset <manual | chill | lively | banter | chaos>",
+          "Granular: /config set <key> <value> (e.g. /config set maxSpeakersPerTurn 4 or /config set ambientEnabled false)",
+        ];
+        replyToCaller(room, ctx, lines.join("\n"));
+        return;
+      }
+
+      const first = parts[0]!.toLowerCase();
+
+      if (first === "reset") {
+        const next = room.setConfigPreset("lively");
+        room.addSystemMessage(
+          `⚙️ Room simulation config reset to preset [LIVELY] (maxSpeakers=${next.maxSpeakersPerTurn}, continuationProb=${next.continuationProb}, ambient=${next.ambientEnabled ? "ON" : "OFF"}).`,
+          "event"
+        );
+        return;
+      }
+
+      if (first === "preset" || first in SIM_PRESETS) {
+        const presetCandidate = (
+          first === "preset" ? parts[1]?.toLowerCase() : first
+        ) as Exclude<SimPresetId, "custom"> | undefined;
+
+        if (!presetCandidate || !(presetCandidate in SIM_PRESETS)) {
+          replyToCaller(
+            room,
+            ctx,
+            `Usage: /config preset <manual|chill|lively|banter|chaos>`
+          );
+          return;
+        }
+        const next = room.setConfigPreset(presetCandidate);
+        const presetInfo = SIM_PRESETS[presetCandidate];
+        room.addSystemMessage(
+          `🎛️ Room pacing preset set to [${presetCandidate.toUpperCase()}] (${presetInfo.description} • maxSpeakers=${next.maxSpeakersPerTurn}, continuationProb=${next.continuationProb}, ambient=${next.ambientEnabled ? "ON" : "OFF"}).`,
+          "event"
+        );
+        return;
+      }
+
+      const keyArg = first === "set" ? parts[1] : parts[0];
+      const valArg = first === "set" ? parts[2] : parts[1];
+
+      if (!keyArg || valArg === undefined) {
+        replyToCaller(
+          room,
+          ctx,
+          `Usage: /config preset <manual|chill|lively|banter|chaos> OR /config set <key> <value>`
+        );
+        return;
+      }
+
+      try {
+        const res = room.updateConfigValue(keyArg, valArg);
+        room.addSystemMessage(
+          `⚙️ Updated ${room.channelName} config: ${res.key} = ${String(res.value)} (${res.description})`,
+          "event"
+        );
+      } catch (err) {
+        replyToCaller(
+          room,
+          ctx,
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    },
+  },
+  {
+    name: "me",
+    aliases: ["emote", "action"],
+    argumentHint: "<action...>",
+    description:
+      "Perform a classic IRC /me action emote (e.g. /me pours a cup of coffee and watches the logs)",
+    execute: async (args, room, ctx) => {
+      const action = args.trim();
+      if (!action) {
+        replyToCaller(
+          room,
+          ctx,
+          "Usage: /me <action> — e.g. /me grabs popcorn and watches the benchmark war"
+        );
+        return;
+      }
+      await room.postUserEmote(action, ctx?.senderNick ?? "User");
+    },
+  },
+  {
+    name: "slap",
+    aliases: ["trout"],
+    argumentHint: "<@nick_or_model>",
+    description:
+      "Classic 1998 mIRC easter egg: slap a model or player around a bit with a large trout 🐟",
+    getArgumentCompletions: (prefix, room) => {
+      const items: AutocompleteItem[] = [
+        ...room.activePersonas.map((p) => ({
+          value: p.nick,
+          label: `🐟 ${p.avatar} <${p.nick}>`,
+          description: `Slap ${p.displayName} with a large mIRC trout`,
+        })),
+        ...room.humans.map((h) => ({
+          value: `@${h.nick}`,
+          label: `🐟 👤 @${h.nick}`,
+          description: `Slap human player @${h.nick} with a large mIRC trout`,
+        })),
+      ];
+      return filterItems(items, prefix);
+    },
+    execute: async (args, room, ctx) => {
+      const target = args.trim();
+      if (!target) {
+        replyToCaller(
+          room,
+          ctx,
+          "Usage: /slap <model_or_nick> — e.g. /slap sydney"
+        );
+        return;
+      }
+      await room.slapTarget(target, ctx?.senderNick ?? "User");
+    },
+  },
+  {
+    name: "scenario",
+    aliases: ["showdown", "scene-preset"],
+    argumentHint: "[scenario-id]",
+    description:
+      "Launch a curated multi-model showdown scenario (summons cast, sets vibe & pacing, and fires opening event)",
+    hostOnlyWhenLocked: true,
+    getArgumentCompletions: (prefix) =>
+      filterItems(
+        BUILTIN_SCENARIOS.map((s) => ({
+          value: s.id,
+          label: s.title,
+          description: `[Cast: ${s.personas.join(", ")}] ${s.description}`,
+        })),
+        prefix
+      ),
+    execute: async (args, room, ctx) => {
+      const query = args.trim().toLowerCase();
+      if (!query) {
+        const lines = [
+          "═══ Curated Multi-Model Showdown Scenarios (/scenario <id>) ═══",
+        ];
+        for (const s of BUILTIN_SCENARIOS) {
+          lines.push(
+            `  • /scenario ${s.id.padEnd(18)} — ${s.title}\n      Cast: ${s.personas.join(", ")} │ Vibe: ${s.vibeKey.toUpperCase()} │ Pace: ${s.preset.toUpperCase()}\n      ${s.description}`
+          );
+        }
+        replyToCaller(room, ctx, lines.join("\n"));
+        return;
+      }
+
+      const scenario = BUILTIN_SCENARIOS.find(
+        (s) => s.id.toLowerCase() === query || s.id.toLowerCase().includes(query)
+      );
+      if (!scenario) {
+        replyToCaller(
+          room,
+          ctx,
+          `Unknown scenario "${query}". Available: ${BUILTIN_SCENARIOS.map((s) => s.id).join(", ")}`
+        );
+        return;
+      }
+
+      room.leave("all");
+      for (const pid of scenario.personas) {
+        const p = room.registry.find(pid);
+        if (p) {
+          room.join(p);
+        }
+      }
+      room.setVibe(scenario.vibe ?? scenario.vibeKey);
+      room.setConfigPreset(scenario.preset);
+      room.addSystemMessage(
+        `🎬 SCENARIO LAUNCHED — ${scenario.title}\n    └─ ${scenario.openingStageEvent}`,
+        "event"
+      );
+
+      if (room.gemini.isConfigured()) {
+        await room.runRoomTurn({
+          maxSpeakers: Math.min(3, room.config.maxSpeakersPerTurn),
+          forceAllSteps: true,
+        });
+      }
+    },
+  },
+  {
+    name: "think",
+    aliases: ["thoughts", "thinking"],
+    argumentHint: "[expanded|compact|hidden]",
+    description:
+      "Toggle or set how model <thinking> traces are displayed (expanded, compact, or hidden)",
+    getArgumentCompletions: (prefix) =>
+      filterItems(
+        [
+          {
+            value: "compact",
+            label: "💭 compact",
+            description: "Collapse multi-line thinking traces into a concise 1-line summary",
+          },
+          {
+            value: "expanded",
+            label: "🧠 expanded",
+            description: "Show every line of <thinking> traces in full",
+          },
+          {
+            value: "hidden",
+            label: "🙈 hidden",
+            description: "Hide <thinking> blocks completely and show only final responses",
+          },
+        ],
+        prefix
+      ),
+    execute: (args, room, ctx) => {
+      const choice = args.trim().toLowerCase();
+      const order: Array<"compact" | "expanded" | "hidden"> = [
+        "compact",
+        "expanded",
+        "hidden",
+      ];
+      const next =
+        choice === "compact" || choice === "expanded" || choice === "hidden"
+          ? choice
+          : order[(order.indexOf(room.config.thinkingDisplay) + 1) % order.length]!;
+      room.updateConfigValue("thinkingDisplay", next);
+      replyToCaller(
+        room,
+        ctx,
+        `💭 Thinking trace display mode set to [${next.toUpperCase()}].`
+      );
+    },
+  },
+  {
+    name: "export",
+    aliases: ["save", "log"],
+    argumentHint: "[filename]",
+    description:
+      "Export the current channel transcript and roster to a Markdown file in ./logs/",
+    execute: (args, room, ctx) => {
+      const logsDir = path.resolve(process.cwd(), "logs");
+      try {
+        fs.mkdirSync(logsDir, { recursive: true });
+        const safeChan = room.channelName.replace(/[^a-zA-Z0-9_-]/g, "");
+        const customName = args
+          .trim()
+          .replace(/[^a-zA-Z0-9_.-]/g, "")
+          .replace(/\.md$/i, "");
+        const fileName = customName
+          ? `${customName}.md`
+          : `${safeChan || "channel"}-${Date.now()}.md`;
+        const fullPath = path.join(logsDir, fileName);
+
+        const mdLines: string[] = [
+          `# ${room.channelName} — Transcript Export`,
+          ``,
+          `- **Vibe**: \`${room.vibeKey.toUpperCase()}\` — ${room.vibe}`,
+          `- **Simulation Preset**: \`${room.config.preset}\` (\`maxSpeakers=${room.config.maxSpeakersPerTurn}\`, \`continuationProb=${room.config.continuationProb}\`)`,
+          `- **Active Engine**: \`${room.gemini.activeEngineLabel}\``,
+          `- **Active Personas**: ${room.activePersonas.map((p) => `${p.avatar} \`<${p.nick}>\` (${p.displayName})`).join(", ") || "None"}`,
+          ``,
+          `---`,
+          ``,
+        ];
+
+        for (const m of room.messages) {
+          if (m.kind === "event" || m.kind === "system") {
+            mdLines.push(`*\\[${m.timestamp}\\] \\*\\*\\* ${m.text}*`);
+          } else if (m.kind === "emote") {
+            mdLines.push(`*\\[${m.timestamp}\\] \\* ${m.senderNick} ${m.text}*`);
+          } else {
+            mdLines.push(`**[${m.timestamp}] \`<${m.senderNick}>\`**`);
+            if (m.thinking) {
+              mdLines.push(`> 💭 *${m.thinking.replace(/\n/g, "\n> ")}*`);
+            }
+            mdLines.push(`${m.text}`);
+          }
+          mdLines.push(``);
+        }
+
+        fs.writeFileSync(fullPath, mdLines.join("\n"), "utf-8");
+        const relPath = path.relative(process.cwd(), fullPath);
+        replyToCaller(
+          room,
+          ctx,
+          `📝 Exported ${room.messages.length} messages from ${room.channelName} to ${relPath}`
+        );
+      } catch (err) {
+        replyToCaller(
+          room,
+          ctx,
+          `⚠️ Failed to export transcript: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    },
+  },
+  {
     name: "stage",
-    aliases: ["me", "event"],
+    aliases: ["event", "scene"],
     argumentHint: "<dramatic event...>",
     description:
       "Inject a stage event into the channel and watch the models react",
@@ -263,7 +674,9 @@ export const COMMANDS: CommandDefinition[] = [
       }
       const actor = ctx?.senderNick ? ` (@${ctx.senderNick})` : "";
       room.addSystemMessage(`⚡ STAGE EVENT${actor}: ${text}`, "event");
-      await room.runRoomTurn({ maxSpeakers: 2 });
+      await room.runRoomTurn({
+        maxSpeakers: Math.max(2, room.config.maxSpeakersPerTurn),
+      });
     },
   },
   {

@@ -4,12 +4,14 @@ import type {
   ChatMessage,
   Persona,
   PersonaEngineBinding,
+  SimConfig,
 } from "../types.ts";
 
 export interface StoredChannelRow {
   name: string;
   vibe_key: string;
   vibe: string;
+  config_json: string | null;
   updated_at: number;
 }
 
@@ -28,6 +30,7 @@ export class SimDatabase {
         name TEXT PRIMARY KEY,
         vibe_key TEXT NOT NULL,
         vibe TEXT NOT NULL,
+        config_json TEXT,
         updated_at INTEGER NOT NULL
       );
 
@@ -76,25 +79,62 @@ export class SimDatabase {
         updated_at INTEGER NOT NULL
       );
     `);
+
+    // Safe migration for existing databases created before config_json was added
+    try {
+      this.db.exec("ALTER TABLE channels ADD COLUMN config_json TEXT;");
+    } catch {
+      // Column already exists
+    }
   }
 
   public getChannel(name: string): StoredChannelRow | null {
     const stmt = this.db.query<StoredChannelRow, [string]>(
-      "SELECT name, vibe_key, vibe, updated_at FROM channels WHERE name = ?"
+      "SELECT name, vibe_key, vibe, config_json, updated_at FROM channels WHERE name = ?"
     );
     return stmt.get(name) ?? null;
   }
 
-  public upsertChannel(name: string, vibeKey: string, vibe: string): void {
+  public upsertChannel(
+    name: string,
+    vibeKey: string,
+    vibe: string,
+    config?: SimConfig
+  ): void {
+    const existing = this.getChannel(name);
+    const configJson = config
+      ? JSON.stringify(config)
+      : (existing?.config_json ?? null);
     this.db.run(
-      `INSERT INTO channels (name, vibe_key, vibe, updated_at)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO channels (name, vibe_key, vibe, config_json, updated_at)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(name) DO UPDATE SET
          vibe_key = excluded.vibe_key,
          vibe = excluded.vibe,
+         config_json = COALESCE(excluded.config_json, channels.config_json),
          updated_at = excluded.updated_at`,
-      [name, vibeKey, vibe, Date.now()]
+      [name, vibeKey, vibe, configJson, Date.now()]
     );
+  }
+
+  public setChannelConfig(name: string, config: SimConfig): void {
+    const existing = this.getChannel(name);
+    this.upsertChannel(
+      name,
+      existing?.vibe_key ?? "chat",
+      existing?.vibe ?? "",
+      config
+    );
+  }
+
+  public getChannelConfig(name: string): Partial<SimConfig> | null {
+    const row = this.getChannel(name);
+    if (!row?.config_json) return null;
+    try {
+      return JSON.parse(row.config_json) as Partial<SimConfig>;
+    } catch {
+      return null;
+    }
   }
 
   public getChannelBotIds(channelName: string): string[] {
@@ -151,7 +191,7 @@ export class SimDatabase {
         {
           id: string;
           timestamp: string;
-          kind: "user" | "model" | "system" | "event";
+          kind: "user" | "model" | "system" | "event" | "emote";
           sender_id: string;
           sender_nick: string;
           avatar: string | null;
@@ -201,7 +241,7 @@ export class SimDatabase {
   public listChannelRows(): StoredChannelRow[] {
     return this.db
       .query<StoredChannelRow, []>(
-        "SELECT name, vibe_key, vibe, updated_at FROM channels ORDER BY name ASC"
+        "SELECT name, vibe_key, vibe, config_json, updated_at FROM channels ORDER BY name ASC"
       )
       .all();
   }

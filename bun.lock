@@ -5,13 +5,13 @@
     "": {
       "name": "llm-sim",
       "dependencies": {
-        "@google/genai": "^2.29.1",
+        "@google/genai": "^2.31.0",
         "@mariozechner/pi-tui": "latest",
-        "chalk": "^5.4.1",
+        "chalk": "^5.6.2",
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "^5.8.2",
+        "typescript": "^5.9.3",
       },
     },
   },
@@ -121,5 +121,7 @@
     "ws": ["ws@8.22.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg=="],
 
     "@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
+
+    "gcp-metadata/google-logging-utils": ["google-logging-utils@1.2.0", "", {}, "sha512-WE9av4wKDZgRjBwgVUabocx8T6/7o3Ca1Fat46FXDhXVAFibzNadedcOXrdgd1Kzmk8tsk/9ZH89Wyf/SqeZ3A=="],
   }
 }

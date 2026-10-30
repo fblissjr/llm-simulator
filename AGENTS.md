@@ -15,6 +15,7 @@
 ## Architecture & Module Map
 
 - `docs/PROVIDERS.md` — Comprehensive setup guide for `gemini`, `openrouter`, `heylookitsanllm`, and per-persona `/bind` configurations.
+- `docs/ROADMAP.md` — Granular simulation variables (`SimConfig`), pacing presets (`manual`, `chill`, `lively`, `banter`, `chaos`), curated scenarios, and long-term roadmap.
 - `src/index.ts` — CLI entrypoint (`host`, `server`, and `connect` modes).
 - `src/types.ts` — Shared domain types (`Persona`, `ChatMessage`, `ProviderId`, `PersonaEngineBinding`, `ChannelSnapshot`, `ClientPacket`, `ServerPacket`).
 - `src/engine/` — Multi-Provider Inference Layer:
@@ -27,9 +28,10 @@
 - `src/personas/` — Persona Catalog & Forge:
   - `src/personas/builtin.ts` — 28 built-in historical personas across 4 eras (`1966–2016`, `2019–2022`, `2022–2023`, `2024–2026`).
   - `src/personas/registry.ts` — `PersonaRegistry`: Fuzzy lookup (`find`), custom `./personas/*.json` loader, SQLite custom persona sync, and dynamic on-the-fly persona synthesis (`summonOrCreate`) when a user summons an unknown model name.
-- `src/core/` — Room State & Slash Commands:
-  - `src/core/room.ts` — `Room`: Manages active personas, connected humans, `<thinking>` stream extraction (`extractThinkingAndBody`), whispers, and the reactive multi-step turn loop (`runRoomTurn`).
-  - `src/core/commands.ts` — Slash command definitions (`/summon`, `/banish`, `/provider`, `/models`, `/engine`, `/bind`, `/vibe`, `/banter`, `/stage`, `/whisper`, `/channel`, `/channels`, `/nick`, `/share`, `/unshare`, `/lock`, `/unlock`, `/kickplayer`, `/roster`, `/inspect`, `/shush`, `/clear`, `/help`, `/quit`) and `ChatroomAutocompleteProvider`.
+- `src/core/` — Room State, Simulation Config & Slash Commands:
+  - `src/core/sim-config.ts` — `SimConfig` presets (`manual`, `chill`, `lively`, `banter`, `chaos`), 19+ granular simulation variable descriptors/clamping (`applySimConfigMutation`), and `BUILTIN_SCENARIOS`.
+  - `src/core/room.ts` — `Room`: Manages active personas, connected humans, `<thinking>` stream extraction (`extractThinkingAndBody`), whispers, organic reading/inter-speaker delays, `yield` human-interruption handling, human typing tracking (`markHumanTyping`), ambient background chatter (`checkAmbientTick`) with `ambientMaxConsecutive` safety caps, and the reactive multi-step turn loop (`runRoomTurn`).
+  - `src/core/commands.ts` — Slash command definitions (`/summon`, `/banish`, `/config`, `/scenario`, `/me`, `/slap`, `/think`, `/export`, `/provider`, `/models`, `/engine`, `/bind`, `/vibe`, `/banter`, `/stage`, `/whisper`, `/channel`, `/channels`, `/nick`, `/share`, `/unshare`, `/lock`, `/unlock`, `/kickplayer`, `/roster`, `/inspect`, `/shush`, `/clear`, `/help`, `/quit`) and `ChatroomAutocompleteProvider`.
 - `src/server/` — Multiplayer Co-op & Persistence:
   - `src/server/db.ts` — `SimDatabase` (`bun:sqlite` in WAL mode): Persists `channels`, `channel_bots`, `messages`, `custom_personas`, `persona_bindings`, and `server_settings` (`global_engine`).
   - `src/server/hub.ts` — `ChannelHub` (`Bun.serve` HTTP + WebSocket server): Enforces `MAX_HUMANS = 4` (DOOM-style 4-player co-op cap), `?key=` passkey validation, per-guest message cooldowns, and multi-channel synchronization.

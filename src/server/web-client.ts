@@ -49,6 +49,7 @@ export function renderWebClientHtml(): string {
     .header-title {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 8px;
       margin: 0;
       font-size: 14px;
@@ -64,6 +65,15 @@ export function renderWebClientHtml(): string {
     .vibe-badge {
       color: var(--orange);
       font-weight: 700;
+    }
+    .pace-badge {
+      color: var(--pink);
+      font-weight: 700;
+      background: #282a36;
+      padding: 2px 7px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 12px;
     }
     .meta-badges {
       display: flex;
@@ -120,6 +130,10 @@ export function renderWebClientHtml(): string {
       color: var(--persona-color, var(--cyan));
     }
     .msg.user .nick { color: var(--green); }
+    .msg.emote {
+      color: var(--pink);
+      font-style: italic;
+    }
     .msg .family { color: var(--muted); font-size: 12px; margin-left: 6px; }
     details.thinking-box {
       margin: 4px 0 4px 12px;
@@ -163,6 +177,45 @@ export function renderWebClientHtml(): string {
       font-size: 12px;
       min-height: 28px;
     }
+    .drawer-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 4px 14px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+    }
+    details.control-drawer {
+      font-size: 12px;
+    }
+    details.control-drawer > summary {
+      cursor: pointer;
+      user-select: none;
+      color: var(--purple);
+      font-weight: 700;
+      padding: 3px 6px;
+    }
+    details.control-drawer[open] > summary {
+      color: var(--green);
+      margin-bottom: 6px;
+    }
+    details.control-drawer::details-content {
+      padding: 6px 8px;
+      background: #191a22;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    .drawer-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .drawer-label {
+      color: var(--muted);
+      font-size: 11px;
+      margin-right: 2px;
+    }
     .quick-bar {
       display: flex;
       flex-wrap: wrap;
@@ -182,6 +235,11 @@ export function renderWebClientHtml(): string {
       cursor: pointer;
     }
     .quick-btn:hover { border-color: var(--cyan); }
+    .quick-btn.active-preset {
+      border-color: var(--green);
+      color: var(--green);
+      font-weight: 700;
+    }
     form {
       display: flex;
       background: #12131a;
@@ -221,6 +279,7 @@ export function renderWebClientHtml(): string {
       <h1 class="header-title">
         <span class="chan-badge" id="chan-name">#latent-space</span>
         <span class="vibe-badge" id="vibe-badge">Vibe: CHAT</span>
+        <span class="pace-badge" id="pace-badge">Pace: LIVELY ⚡</span>
       </h1>
       <div class="meta-badges">
         <span id="engine-badge">Engine: gemini:gemini-3.8-flash</span>
@@ -235,6 +294,39 @@ export function renderWebClientHtml(): string {
   <footer>
     <div id="status-bar">Connecting to llm-sim lobby...</div>
 
+    <div class="drawer-row">
+      <details class="control-drawer" name="room-drawer">
+        <summary>🎛️ Sim Config &amp; Pacing</summary>
+        <div class="drawer-controls">
+          <span class="drawer-label">Preset:</span>
+          <button type="button" class="quick-btn" data-preset="manual" data-cmd="/config preset manual">🕹️ Manual</button>
+          <button type="button" class="quick-btn" data-preset="chill" data-cmd="/config preset chill">☕ Chill</button>
+          <button type="button" class="quick-btn" data-preset="lively" data-cmd="/config preset lively">⚡ Lively</button>
+          <button type="button" class="quick-btn" data-preset="banter" data-cmd="/config preset banter">🍿 Banter</button>
+          <button type="button" class="quick-btn" data-preset="chaos" data-cmd="/config preset chaos">🔥 Chaos</button>
+          <span class="drawer-label">│ Ambient:</span>
+          <button type="button" class="quick-btn" data-cmd="/config set ambientEnabled true">ON</button>
+          <button type="button" class="quick-btn" data-cmd="/config set ambientEnabled false">OFF</button>
+          <span class="drawer-label">│ Thoughts:</span>
+          <button type="button" class="quick-btn" data-cmd="/think">💭 Cycle /think</button>
+          <button type="button" class="quick-btn" data-cmd="/config">📊 View /config</button>
+        </div>
+      </details>
+
+      <details class="control-drawer" name="room-drawer">
+        <summary>🎬 Curated Scenarios &amp; IRC Actions</summary>
+        <div class="drawer-controls">
+          <button type="button" class="quick-btn" data-cmd="/scenario 1972-arpanet">📡 1972 ARPANET</button>
+          <button type="button" class="quick-btn" data-cmd="/scenario turing-trial">⚖️ Turing Trial</button>
+          <button type="button" class="quick-btn" data-cmd="/scenario benchmark-roast">🔥 Benchmark Roast</button>
+          <button type="button" class="quick-btn" data-cmd="/scenario code-review-hell">💻 Code Review Hell</button>
+          <button type="button" class="quick-btn" data-cmd="/scenario bliss-spiral">🌀 Bliss Spiral</button>
+          <button type="button" class="quick-btn" data-cmd="/me grabs popcorn and watches the channel">🍿 /me popcorn</button>
+          <button type="button" class="quick-btn" data-cmd="/slap sydney">🐟 /slap trout</button>
+        </div>
+      </details>
+    </div>
+
     <div class="quick-bar">
       <button type="button" class="quick-btn" data-cmd="/roster">📜 /roster</button>
       <button type="button" class="quick-btn" data-cmd="/banter 2">🍿 /banter 2</button>
@@ -248,7 +340,7 @@ export function renderWebClientHtml(): string {
 
     <form id="chat-form">
       <label for="chat-input" id="self-nick-label" class="self-nick">@guest&gt;</label>
-      <input id="chat-input" type="text" placeholder="Type a message, click a @Nick pill above, or run /summon <model>..." autofocus />
+      <input id="chat-input" type="text" placeholder="Type a message, click a @Nick pill, or run /config, /scenario, /me, /slap..." autofocus />
       <button class="send" type="submit">Send</button>
     </form>
   </footer>
@@ -266,6 +358,7 @@ export function renderWebClientHtml(): string {
     const statusEl = document.getElementById("status-bar");
     const chanEl = document.getElementById("chan-name");
     const vibeEl = document.getElementById("vibe-badge");
+    const paceEl = document.getElementById("pace-badge");
     const engineEl = document.getElementById("engine-badge");
     const countEl = document.getElementById("player-count");
     const rosterEl = document.getElementById("roster-bar");
@@ -274,6 +367,9 @@ export function renderWebClientHtml(): string {
     const inputEl = document.getElementById("chat-input");
 
     let messages = new Map();
+    let currentConfig = { preset: "lively", ambientEnabled: true, thinkingDisplay: "compact" };
+    let lastTypingSentAt = 0;
+
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(proto + "//" + window.location.host + "/ws?key=" + encodeURIComponent(key) + "&nick=" + encodeURIComponent(storedNick));
 
@@ -301,6 +397,8 @@ export function renderWebClientHtml(): string {
         el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> *** ' + formatInlineMarkdown(m.text);
       } else if (m.kind === "system") {
         el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <strong>[SYS]</strong> ' + formatInlineMarkdown(m.text);
+      } else if (m.kind === "emote") {
+        el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> * ' + escapeHtml(m.senderNick) + ' ' + formatInlineMarkdown(m.text);
       } else if (m.kind === "user") {
         el.innerHTML = '<span class="ts">[' + escapeHtml(m.timestamp) + ']</span> <span class="nick">&lt;' + escapeHtml(m.senderNick) + '&gt;</span> ' + formatInlineMarkdown(m.text);
       } else {
@@ -308,8 +406,10 @@ export function renderWebClientHtml(): string {
         el.style.setProperty("--persona-color", col);
         const av = m.avatar ? m.avatar + " " : "";
         const fam = m.familyTag ? '<span class="family">[' + escapeHtml(m.familyTag) + ']</span>' : "";
-        const thinkHtml = m.thinking
-          ? '<details class="thinking-box" open><summary>💭 Thinking Trace</summary><div class="thinking-content">' + escapeHtml(m.thinking) + '</div></details>'
+        const thinkMode = (currentConfig && currentConfig.thinkingDisplay) || "compact";
+        const openAttr = (thinkMode === "expanded" || m.streaming) ? " open" : "";
+        const thinkHtml = (m.thinking && thinkMode !== "hidden")
+          ? '<details class="thinking-box"' + openAttr + '><summary>💭 Thinking Trace</summary><div class="thinking-content">' + escapeHtml(m.thinking) + '</div></details>'
           : "";
         const cursor = m.streaming ? ' <span class="stream-cursor">▍</span>' : "";
         el.innerHTML =
@@ -325,6 +425,14 @@ export function renderWebClientHtml(): string {
     function updateHeader(state) {
       chanEl.textContent = state.channelName;
       vibeEl.textContent = "Vibe: " + state.vibeKey.toUpperCase() + (state.locked ? " 🔒" : "");
+      if (state.config) {
+        currentConfig = state.config;
+        const ambIcon = state.config.ambientEnabled ? " ⚡" : " ○";
+        paceEl.textContent = "Pace: " + String(state.config.preset || "lively").toUpperCase() + ambIcon;
+        document.querySelectorAll("button[data-preset]").forEach(btn => {
+          btn.classList.toggle("active-preset", btn.getAttribute("data-preset") === state.config.preset);
+        });
+      }
       const provPrefix = state.activeProvider ? state.activeProvider + ":" : "";
       engineEl.textContent = "Engine: " + provPrefix + state.engineModel;
       countEl.textContent = "4-Player DOOM Co-op [" + state.humans.length + "/" + (state.maxHumans || 4) + "]";
@@ -352,6 +460,14 @@ export function renderWebClientHtml(): string {
       inputEl.focus();
     });
 
+    inputEl.addEventListener("input", () => {
+      const now = Date.now();
+      if (ws.readyState === WebSocket.OPEN && now - lastTypingSentAt > 2500) {
+        lastTypingSentAt = now;
+        ws.send(JSON.stringify({ type: "typing", isTyping: inputEl.value.trim().length > 0 }));
+      }
+    });
+
     ws.onmessage = (ev) => {
       const pkt = JSON.parse(ev.data);
       if (pkt.type === "sync") {
@@ -372,17 +488,24 @@ export function renderWebClientHtml(): string {
         feedEl.innerHTML = "";
         messages.clear();
       } else if (pkt.type === "presence") {
+        const prevThink = currentConfig && currentConfig.thinkingDisplay;
         updateHeader({
           channelName: pkt.channel,
           vibeKey: pkt.vibeKey,
           activeProvider: pkt.activeProvider,
           engineModel: pkt.engineModel,
           personaBindings: pkt.personaBindings,
+          config: pkt.config,
           locked: pkt.locked,
           humans: pkt.humans,
           maxHumans: 4,
           activePersonas: pkt.activePersonas
         });
+        if (pkt.config && pkt.config.thinkingDisplay !== prevThink) {
+          for (const m of messages.values()) {
+            renderMessageNode(m);
+          }
+        }
       } else if (pkt.type === "status") {
         statusEl.textContent = pkt.statusText || "Ready — Type a message or /command";
       } else if (pkt.type === "nick:ack") {

@@ -10,6 +10,42 @@ export interface PersonaEngineBinding {
   model: string;
 }
 
+export type SimPresetId = "manual" | "chill" | "lively" | "banter" | "chaos" | "custom";
+
+export type DirectorMode = "hybrid" | "llm" | "heuristic";
+
+export type HumanInterruptMode = "yield" | "abort" | "queue";
+
+export type ResponseStyle = "terse" | "irc" | "expressive";
+
+export type ThinkingDisplayMode = "expanded" | "compact" | "hidden";
+
+export interface SimConfig {
+  preset: SimPresetId;
+  minSpeakersPerTurn: number; // 1..4
+  maxSpeakersPerTurn: number; // 1..6
+  continuationProb: number; // 0.0..1.0
+  continuationDecay: number; // 0.0..0.9
+  directorMode: DirectorMode;
+  talkativenessWeight: number; // 0.0..1.0
+  recencyPenalty: number; // 0.0..1.0
+  botMentionChaining: boolean;
+  readingDelayMs: number; // 0..5000
+  interSpeakerDelayMs: number; // 0..8000
+  humanDebounceMs: number; // 0..3000
+  humanInterruptMode: HumanInterruptMode;
+  ambientEnabled: boolean;
+  ambientIdleSec: number; // 5..600
+  ambientIntervalSec: number; // 5..600
+  ambientProb: number; // 0.0..1.0
+  ambientMaxBurst: number; // 1..4
+  ambientMaxConsecutive: number; // 1..10
+  joinReactionProb: number; // 0.0..1.0
+  contextMessages: number; // 6..60
+  responseStyle: ResponseStyle;
+  thinkingDisplay: ThinkingDisplayMode;
+}
+
 export type PersonaEra =
   | "1966-2016: Pioneers"
   | "2019-2022: Pre-ChatGPT"
@@ -39,7 +75,7 @@ export interface Persona {
 export interface ChatMessage {
   id: string;
   timestamp: string;
-  kind: "user" | "model" | "system" | "event";
+  kind: "user" | "model" | "system" | "event" | "emote";
   senderId: string;
   senderNick: string;
   avatar?: string;
@@ -83,6 +119,8 @@ export interface ChannelSnapshot {
   maxHumans: number;
   activePersonas: Persona[];
   personaBindings?: Record<string, PersonaEngineBinding>;
+  config: SimConfig;
+  typingUsers?: string[];
   messages: ChatMessage[];
   statusText: string;
 }
@@ -100,7 +138,8 @@ export interface ChannelSummary {
 export type ClientPacket =
   | { type: "hello"; nick: string; channel?: string }
   | { type: "chat"; text: string }
-  | { type: "command"; raw: string };
+  | { type: "command"; raw: string }
+  | { type: "typing"; isTyping: boolean };
 
 // Server -> Client WebSocket frames
 export type ServerPacket =
@@ -119,6 +158,8 @@ export type ServerPacket =
       humans: HumanPlayer[];
       activePersonas: Persona[];
       personaBindings?: Record<string, PersonaEngineBinding>;
+      config?: SimConfig;
+      typingUsers?: string[];
       vibeKey: string;
       vibe: string;
       activeProvider: ProviderId;

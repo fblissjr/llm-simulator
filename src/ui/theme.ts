@@ -5,7 +5,7 @@ import type {
 } from "@mariozechner/pi-tui";
 import chalk from "chalk";
 import type { Room } from "../core/room.ts";
-import type { ChatMessage } from "../types.ts";
+import type { ChatMessage, ThinkingDisplayMode } from "../types.ts";
 
 export const selectListTheme: SelectListTheme = {
   selectedPrefix: (t) => chalk.hex("#50fa7b").bold(t),
@@ -57,6 +57,10 @@ export function renderIrcHeader(
   const lockIcon = opts?.locked ? chalk.hex("#ff5555")(" 🔒") : "";
   const vibeBadge =
     chalk.hex("#ffb86c").bold(`Vibe: ${room.vibeKey.toUpperCase()}`) + lockIcon;
+  const ambientDot = room.config.ambientEnabled ? "⚡" : "○";
+  const paceBadge = chalk.hex("#ff79c6")(
+    `Pace: ${room.config.preset.toUpperCase()}${ambientDot}`
+  );
   const engineBadge = chalk.hex("#8be9fd")(
     `Engine: ${room.gemini.activeEngineLabel}`
   );
@@ -94,7 +98,7 @@ export function renderIrcHeader(
       })
       .join("  ") || chalk.dim("(none — use /summon)");
 
-  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
+  const topLine = `${chalk.hex("#6272a4")("╔══")}${title}${chalk.hex("#6272a4")("══╡")} ${vibeBadge} ${chalk.hex("#6272a4")("│")} ${paceBadge} ${chalk.hex("#6272a4")("│")} ${engineBadge} ${chalk.hex("#6272a4")("│")} ${chalk.hex("#f1fa8c")(`Co-op [${humanList.length}/${maxH}]`)} ${chalk.hex("#6272a4")("│")} ${apiStatus}`;
   const rosterLine = `${chalk.hex("#6272a4")("╠══")} ${chalk.dim("Humans:")} ${humanTags} ${chalk.hex("#6272a4")("│")} ${chalk.dim(`AIs [${room.activePersonas.length}]:`)} ${botTags}`;
 
   const inviteInfo = opts?.shareUrl
@@ -102,7 +106,7 @@ export function renderIrcHeader(
     : opts?.localInviteUrl
       ? `${chalk.dim("LAN Browser Invite:")} ${chalk.hex("#8be9fd")(opts.localInviteUrl)} ${chalk.dim("(/share for public link)")}`
       : chalk.dim(
-          "Commands: /summon • /banish • /vibe • /banter • /channel #name • /share • /roster • /help"
+          "Commands: /summon • /config • /scenario • /vibe • /me • /slap • /share • /help"
         );
 
   const hintLine = `${chalk.hex("#6272a4")("╚══")} ${inviteInfo}`;
@@ -116,7 +120,10 @@ function styleInlineMarkdown(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, (_m, bold) => chalk.bold(bold));
 }
 
-export function formatChatMessage(msg: ChatMessage): string {
+export function formatChatMessage(
+  msg: ChatMessage,
+  opts?: { thinkingDisplay?: ThinkingDisplayMode }
+): string {
   const ts = chalk.hex("#6272a4")(`[${msg.timestamp}]`);
 
   if (msg.kind === "event") {
@@ -125,6 +132,13 @@ export function formatChatMessage(msg: ChatMessage): string {
 
   if (msg.kind === "system") {
     return `${ts} ${chalk.hex("#8be9fd").bold("[SYS]")} ${chalk.hex("#d8dee9")(msg.text)}`;
+  }
+
+  if (msg.kind === "emote") {
+    const nickTag = msg.senderNick.startsWith("@")
+      ? msg.senderNick
+      : `@${msg.senderNick}`;
+    return `${ts} ${chalk.hex(msg.color || "#ff79c6").italic(`* ${nickTag} ${msg.text}`)}`;
   }
 
   if (msg.kind === "user") {
@@ -144,12 +158,26 @@ export function formatChatMessage(msg: ChatMessage): string {
   const parts: string[] = [];
   parts.push(`${ts} ${nickColor(`<${avatar}${msg.senderNick}>`)}${familyMeta}`);
 
-  if (msg.thinking) {
-    const thoughtLines = msg.thinking
-      .split("\n")
-      .map((line) => `    ${chalk.hex("#6272a4").italic(`💭 ${line}`)}`)
-      .join("\n");
-    parts.push(thoughtLines);
+  const thinkingMode = opts?.thinkingDisplay ?? "expanded";
+  if (msg.thinking && thinkingMode !== "hidden") {
+    const rawLines = msg.thinking.split("\n");
+    if (
+      thinkingMode === "compact" &&
+      !msg.streaming &&
+      (rawLines.length > 2 || msg.thinking.length > 140)
+    ) {
+      const firstLine = rawLines[0]!.trim().slice(0, 85);
+      parts.push(
+        `    ${chalk.hex("#6272a4").italic(`💭 [${rawLines.length} lines: "${firstLine}..." • Ctrl+T to expand]`)}`
+      );
+    } else {
+      const thoughtLines = rawLines
+        .map((line) => `    ${chalk.hex("#6272a4").italic(`💭 ${line}`)}`)
+        .join("\n");
+      parts.push(thoughtLines);
+    }
+  } else if (msg.thinking && thinkingMode === "hidden" && msg.streaming && !msg.text) {
+    parts.push(`    ${chalk.hex("#6272a4").italic("💭 thinking...")}`);
   }
 
   if (msg.text) {

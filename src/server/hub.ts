@@ -169,6 +169,7 @@ export class ChannelHub {
   public stop(): void {
     this.tunnel.stop();
     for (const room of this.rooms.values()) {
+      room.stopAmbientLoop();
       room.abortCurrentTurn();
     }
     if (this.server) {
@@ -284,6 +285,8 @@ export class ChannelHub {
       maxHumans: this.maxHumans,
       activePersonas: room.activePersonas,
       personaBindings: this.gemini.getAllPersonaBindings(),
+      config: room.config,
+      typingUsers: room.getTypingHumans(),
       messages: room.messages.slice(-80),
       statusText: room.statusText,
     };
@@ -345,6 +348,8 @@ export class ChannelHub {
       humans: room.humans,
       activePersonas: room.activePersonas,
       personaBindings: this.gemini.getAllPersonaBindings(),
+      config: room.config,
+      typingUsers: room.getTypingHumans(),
       vibeKey: room.vibeKey,
       vibe: room.vibe,
       activeProvider: this.gemini.activeProvider,
@@ -420,6 +425,11 @@ export class ChannelHub {
       if (packet.channel && packet.channel !== ws.data.channel) {
         this.switchClientChannel(ws, packet.channel);
       }
+      return;
+    }
+
+    if (packet.type === "typing") {
+      room.markHumanTyping(ws.data.nick, Boolean(packet.isTyping));
       return;
     }
 

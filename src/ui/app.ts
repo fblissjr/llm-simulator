@@ -42,6 +42,8 @@ export class ChatroomApp {
   private localInviteUrl?: string;
   private maxHumans = 4;
   private apiOnline?: boolean;
+  private typingUsers: string[] = [];
+  private lastTypingSentAt = 0;
   private scrollOffset = 0;
   private spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   private spinnerIndex = 0;
@@ -151,9 +153,8 @@ export class ChatroomApp {
     this.room.addSystemMessage(
       `Welcome to ${this.room.channelName} — The Multi-Era LLM Simulation Chatroom (1966–2026)!\n` +
         `  Currently in channel: ${starterList}\n` +
-        `  • Type a message (or @Nick) to chat with the room.\n` +
-        `  • Use /summon <model> to summon ANY historical, modern, or fictional AI (e.g. /summon eliza parry galactica deepseek-r1).\n` +
-        `  • Use /banish <model>, /vibe <chat|debate|roast|chaos>, /banter, /stage <event>, /whisper <model> <secret>, /channel #name, or /share.`,
+        `  • Type a message (or @Nick) to chat with the room (Preset: ${this.room.config.preset.toUpperCase()} — 1 to ${this.room.config.maxSpeakersPerTurn} bots react naturally!).\n` +
+        `  • Use /summon <model>, /config [preset|set], /scenario <id>, /vibe, /me <action>, /slap <nick>, /whisper, or /share.`,
       "system",
       false
     );
@@ -215,6 +216,10 @@ export class ChatroomApp {
       if (s.personaBindings) {
         this.room.gemini.setAllPersonaBindings(s.personaBindings);
       }
+      if (s.config) {
+        this.room.config = s.config;
+      }
+      this.typingUsers = s.typingUsers ?? [];
       this.apiOnline = s.apiOnline;
       this.locked = s.locked;
       this.shareUrl = s.shareUrl;
@@ -245,6 +250,10 @@ export class ChatroomApp {
       if (packet.personaBindings) {
         this.room.gemini.setAllPersonaBindings(packet.personaBindings);
       }
+      if (packet.config) {
+        this.room.config = packet.config;
+      }
+      this.typingUsers = packet.typingUsers ?? [];
       this.apiOnline = packet.apiOnline;
       this.locked = packet.locked;
       this.shareUrl = packet.shareUrl;
@@ -339,6 +348,18 @@ export class ChatroomApp {
         return { consume: true };
       }
 
+      if (matchesKey(data, "ctrl+t")) {
+        if (this.wsUrl) {
+          this.sendClientPacket({ type: "command", raw: "/think" });
+        } else {
+          void handleSlashCommand("/think", this.room, {
+            senderNick: this.selfNick,
+            isHost: this.isHost,
+          });
+        }
+        return { consume: true };
+      }
+
       if (matchesKey(data, "escape") && !this.editor.isShowingAutocomplete()) {
         if (this.wsUrl) {
           this.sendClientPacket({ type: "command", raw: "/shush" });
@@ -351,6 +372,17 @@ export class ChatroomApp {
             false
           );
           return { consume: true };
+        }
+      }
+
+      // Notify typing presence (throttled) so ambient chatter pauses while a human is typing
+      const now = Date.now();
+      if (now - this.lastTypingSentAt > 2500) {
+        this.lastTypingSentAt = now;
+        if (this.wsUrl) {
+          this.sendClientPacket({ type: "typing", isTyping: true });
+        } else {
+          this.room.markHumanTyping(this.selfNick, true);
         }
       }
 
@@ -402,7 +434,11 @@ export class ChatroomApp {
     const startIdx = Math.max(0, endIdx - 45);
     const renderedMessages = this.room.messages
       .slice(startIdx, endIdx)
-      .map((m) => formatChatMessage(m))
+      .map((m) =>
+        formatChatMessage(m, {
+          thinkingDisplay: this.room.config.thinkingDisplay,
+        })
+      )
       .join("\n\n");
 
     this.feedView.setText(
@@ -430,9 +466,18 @@ export class ChatroomApp {
         this.scrollOffset > 0
           ? chalk.hex("#ffb86c")(` [Scrolled +${this.scrollOffset} msgs • PgDn to return] `)
           : "";
+      const otherTypers = (
+        this.wsUrl ? this.typingUsers : this.room.getTypingHumans()
+      ).filter((u) => u.toLowerCase() !== this.selfNick.toLowerCase());
+      const typingBadge =
+        otherTypers.length > 0
+          ? chalk.hex("#8be9fd")(
+              ` [✍️ ${otherTypers.map((u) => `@${u}`).join(", ")} typing...] `
+            )
+          : "";
       this.statusView.setText(
         chalk.hex("#6272a4")(
-          `  ── [@${this.selfNick}]${scrollBadge} Type a message or /command (Tab: autocomplete • PgUp/PgDn: scroll • Esc: shush) ──`
+          `  ── [@${this.selfNick}]${scrollBadge}${typingBadge} Type a message or /command (Tab: autocomplete • Ctrl+T: thoughts • Esc: shush) ──`
         )
       );
     }
@@ -462,6 +507,7 @@ export class ChatroomApp {
       }
       this.ws = null;
     }
+    this.room.stopAmbientLoop();
     this.room.abortCurrentTurn();
     this.hub?.stop();
     this.tui.stop();

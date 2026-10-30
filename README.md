@@ -13,6 +13,7 @@ Summon and direct **28 built-in iconic AI personas** spanning 60 years of langua
 3. **`heylookitsanllm` (`heylook`)**: Connects to your local MLX / GGUF server via its Anthropic Messages-conformant `POST /v1/messages` and `GET /v1/models` endpoints (default `http://127.0.0.1:8000`, configurable via `HEYLOOK_URL`). Automatically discovers resident checkpoints, streams native `thinking_delta` + `text_delta` blocks, and reuses the single loaded model so `max_loaded_models = 1` never thrashes VRAM.
 
 📖 **See the full [Provider Setup & Multi-Engine Guide (`docs/PROVIDERS.md`)](./docs/PROVIDERS.md)** for environment variables, local `heylookitsanllm` setup, hybrid `/bind` arenas, and adding new providers.
+🎛️ **See the [Simulation Variables & Roadmap Guide (`docs/ROADMAP.md`)](./docs/ROADMAP.md)** for all 5 pacing presets (`manual`, `chill`, `lively`, `banter`, `chaos`), 19+ granular `/config` knobs, ambient chatter safety caps, and curated `/scenario` showdowns.
 
 ## Quickstart
 
@@ -33,7 +34,7 @@ bun run start --provider heylook
 
 ```bash
 # Start as Host and auto-open a 4-player Co-op tunnel
-bun run start --nick fred --channel "#latent-space" --share
+bun run start --nick player1 --channel "#latent-space" --share
 
 # Connect from another terminal on LAN
 bun run connect "ws://192.168.1.x:4321/ws?key=<passkey>" --nick alice
@@ -51,6 +52,12 @@ bun run server --port 4321
 - `/engine <flash|lite|model|provider:model>`: Switch the active room model (e.g. `/engine openrouter:deepseek/deepseek-r1` or `/engine heylook:Qwen3-30B`)
 - `/bind <persona> <provider:model | reset>`: Bind a specific persona to a specific provider & model while keeping its simulated persona system prompt (e.g. `/bind sydney openrouter:openai/gpt-4o`)
 - `/vibe <chat|debate|roast|chaos|custom text...>`: Change the channel's scenario/directive
+- `/config [preset <manual|chill|lively|banter|chaos> | set <key> <val> | reset]`: Inspect or tune granular chatroom pacing, multi-bot chaining, reading delays, and ambient life
+- `/scenario [1972-arpanet|turing-trial|benchmark-roast|code-review-hell|bliss-spiral]`: Launch a curated multi-model showdown (summons cast, sets vibe & pacing, and fires an opening event)
+- `/me <action>`: Perform a classic IRC action emote (`* @nick pours a cup of coffee`)
+- `/slap <target>`: Classic 1998 mIRC easter egg (`* @nick slaps <Target> around a bit with a large 1998 mIRC trout 🐟`)
+- `/think [compact|expanded|hidden]`: Toggle how `<thinking>` traces are displayed (or press `Ctrl+T` in the TUI)
+- `/export [filename]`: Export the current channel transcript and roster to `./logs/<name>.md`
 - `/banter [rounds]`: Let the models in the channel autonomously banter/argue for `N` turns
 - `/stage <event>`: Inject a dramatic stage event into the channel
 - `/whisper <model> <secret>`: Privately plant a secret instruction or rumor in one model's ear
@@ -64,7 +71,7 @@ bun run server --port 4321
 - `/inspect <model>`: Inspect a model's full persona sheet, bound engine, and system prompt
 - `/shush` (or `Esc`): Interrupt any currently streaming turn
 - `/clear`, `/help`, `/quit`
-- **Keyboard Shortcuts (Terminal TUI)**: `Tab` (autocomplete `/commands`, models, `@Human`, and `@Bot`), `PgUp` / `PgDn` (scroll through SQLite channel history), `Esc` (interrupt streaming), `Ctrl+C` (exit).
+- **Keyboard Shortcuts (Terminal TUI)**: `Tab` (autocomplete `/commands`, models, `@Human`, and `@Bot`), `Ctrl+T` (cycle `<thinking>` display: compact / expanded / hidden), `PgUp` / `PgDn` (scroll through SQLite channel history), `Esc` (interrupt streaming), `Ctrl+C` (exit).
 
 ## Extending Personas
 
