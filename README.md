@@ -52,7 +52,8 @@ bun run server --port 4321
 - `/engine <flash|lite|model|provider:model>`: Switch the active room model (e.g. `/engine openrouter:deepseek/deepseek-r1` or `/engine heylook:Qwen3-30B`)
 - `/bind <persona> <provider:model | reset>`: Bind a specific persona to a specific provider & model while keeping its simulated persona system prompt (e.g. `/bind sydney openrouter:openai/gpt-4o`)
 - `/vibe <chat|debate|roast|chaos|custom text...>`: Change the channel's scenario/directive
-- `/config [preset <manual|chill|lively|banter|chaos> | set <key> <val> | reset]`: Inspect or tune granular chatroom pacing, multi-bot chaining, reading delays, and ambient life
+- `/settings [pacing|director|ambient|emergent|memory|display | <key> [val]]` (or `/menu`, `/options`, `Ctrl+O` in TUI, `⚙️ Settings` button in Web UI): Open the interactive Settings Control Center to toggle or tune all 30 granular simulation & emergent AI settings
+- `/config [preset <manual|chill|lively|banter|chaos> | set <key> <val> | reset]`: Inspect or tune granular chatroom pacing, multi-bot chaining, reading delays, emergent AI toggles, and ambient life
 - `/scenario [1972-arpanet|turing-trial|benchmark-roast|code-review-hell|bliss-spiral]`: Launch a curated multi-model showdown (summons cast, sets vibe & pacing, and fires an opening event)
 - `/me <action>`: Perform a classic IRC action emote (`* @nick pours a cup of coffee`)
 - `/slap <target>`: Classic 1998 mIRC easter egg (`* @nick slaps <Target> around a bit with a large 1998 mIRC trout 🐟`)
@@ -82,7 +83,7 @@ bun run server --port 4321
 - `/inspect <model>`: Inspect a model's full persona sheet, bound engine, and system prompt
 - `/shush` (or `Esc`): Interrupt any currently streaming turn
 - `/clear`, `/help`, `/quit`
-- **Keyboard Shortcuts (Terminal TUI)**: `Tab` (autocomplete `/commands`, models, `@Human`, and `@Bot`), `Ctrl+T` (cycle `<thinking>` display: compact / expanded / hidden), `PgUp` / `PgDn` (scroll through SQLite channel history), `Esc` (interrupt streaming), `Ctrl+C` (exit).
+- **Keyboard Shortcuts (Terminal TUI)**: `Tab` (autocomplete `/commands`, models, `@Human`, and `@Bot`), `Ctrl+O` (open/close interactive Settings Control Center), `Ctrl+T` (cycle `<thinking>` display: compact / expanded / hidden), `PgUp` / `PgDn` (scroll through SQLite channel history), `Esc` (interrupt streaming or close Settings modal), `Ctrl+C` (exit).
 
 ## Extending Personas
 

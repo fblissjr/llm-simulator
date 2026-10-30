@@ -273,6 +273,9 @@ export class ChannelHub {
             updatedBy,
           });
         },
+        onAmbientRoam: () => {
+          this.roamBot(channelName);
+        },
       },
     });
 

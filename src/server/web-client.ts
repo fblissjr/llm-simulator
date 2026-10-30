@@ -351,6 +351,105 @@ export function renderWebClientHtml(): string {
       padding: 6px 14px;
       cursor: pointer;
     }
+    dialog#settings-dialog {
+      background: var(--panel);
+      color: var(--fg);
+      border: 2px solid var(--purple);
+      border-radius: 8px;
+      padding: 0;
+      width: min(820px, 94vw);
+      max-height: 86dvh;
+      box-shadow: 0 12px 42px rgba(0, 0, 0, 0.7);
+    }
+    dialog#settings-dialog[open] {
+      display: flex;
+      flex-direction: column;
+    }
+    dialog:modal {
+      overscroll-behavior: contain;
+    }
+    dialog::backdrop {
+      background: rgba(10, 11, 16, 0.76);
+      overflow: hidden;
+      overscroll-behavior: contain;
+    }
+    .settings-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: #12131a;
+      border-bottom: 1px solid var(--border);
+    }
+    .settings-header h2 {
+      margin: 0;
+      font-size: 15px;
+      color: var(--green);
+    }
+    .settings-body {
+      padding: 14px 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    fieldset.settings-group {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin: 0;
+      background: #191a22;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 10px 14px;
+    }
+    fieldset.settings-group legend {
+      color: var(--purple);
+      font-weight: 700;
+      font-size: 12px;
+      padding: 0 6px;
+    }
+    .setting-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+    }
+    .setting-field.checkbox-row {
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+    }
+    .setting-field label {
+      color: var(--fg);
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .setting-field small {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .setting-field input[type="number"],
+    .setting-field select {
+      background: #12131a;
+      color: var(--cyan);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+    .setting-field input[type="checkbox"] {
+      accent-color: var(--green);
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
+    }
+    form.dialog-close-form {
+      background: transparent;
+      border: none;
+      padding: 0;
+    }
   </style>
 </head>
 <body>
@@ -364,6 +463,7 @@ export function renderWebClientHtml(): string {
       <div class="meta-badges">
         <span id="engine-badge">Engine: gemini:gemini-3.8-flash</span>
         <span id="player-count">4-Player DOOM Co-op [1/4]</span>
+        <button type="button" class="quick-btn" id="open-settings-btn">⚙️ Settings</button>
       </div>
     </div>
     <div class="roster-row" id="roster-bar">Connecting...</div>
@@ -390,6 +490,7 @@ export function renderWebClientHtml(): string {
           <span class="drawer-label">│ Thoughts:</span>
           <button type="button" class="quick-btn" data-cmd="/think">💭 Cycle /think</button>
           <button type="button" class="quick-btn" data-cmd="/config">📊 View /config</button>
+          <button type="button" class="quick-btn" id="drawer-settings-btn">⚙️ Full Settings Menu</button>
         </div>
       </details>
 
@@ -459,10 +560,188 @@ export function renderWebClientHtml(): string {
 
     <form id="chat-form">
       <label for="chat-input" id="self-nick-label" class="self-nick">@guest&gt;</label>
-      <input id="chat-input" type="text" placeholder="Type a message, click a @Nick pill, or run /config, /scenario, /me, /slap..." autofocus />
+      <input id="chat-input" type="text" placeholder="Type a message, click a @Nick pill, or run /settings, /config, /scenario, /me, /slap..." autofocus />
       <button class="send" type="submit">Send</button>
     </form>
   </footer>
+
+  <dialog id="settings-dialog" closedby="any" aria-labelledby="settings-title">
+    <div class="settings-header">
+      <h2 id="settings-title">⚙️ Simulation &amp; Emergent Feature Control Center</h2>
+      <form method="dialog" class="dialog-close-form">
+        <button type="submit" value="close" class="quick-btn">✕ Close (Esc)</button>
+      </form>
+    </div>
+    <div class="settings-body">
+      <fieldset class="settings-group">
+        <legend>🎛️ Room Pacing Presets</legend>
+        <div class="drawer-controls" style="grid-column: 1 / -1;">
+          <button type="button" class="quick-btn" data-preset="manual" data-cmd="/config preset manual">🕹️ Manual</button>
+          <button type="button" class="quick-btn" data-preset="chill" data-cmd="/config preset chill">☕ Chill</button>
+          <button type="button" class="quick-btn" data-preset="lively" data-cmd="/config preset lively">⚡ Lively (Default)</button>
+          <button type="button" class="quick-btn" data-preset="banter" data-cmd="/config preset banter">🍿 Banter</button>
+          <button type="button" class="quick-btn" data-preset="chaos" data-cmd="/config preset chaos">🔥 Chaos</button>
+          <button type="button" class="quick-btn" data-cmd="/config reset">🔄 Reset to Default</button>
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>✨ Emergent AI Features (Reactions, Art, Moods, Relations)</legend>
+        <div class="setting-field checkbox-row">
+          <input type="checkbox" id="cfg-botAutonomousReactions" data-config-key="botAutonomousReactions" checked />
+          <label for="cfg-botAutonomousReactions">Autonomous Bot Emoji [REACT]</label>
+        </div>
+        <div class="setting-field checkbox-row">
+          <input type="checkbox" id="cfg-botAutonomousImagine" data-config-key="botAutonomousImagine" checked />
+          <label for="cfg-botAutonomousImagine">Autonomous Bot Art [IMAGINE]</label>
+        </div>
+        <div class="setting-field checkbox-row">
+          <input type="checkbox" id="cfg-botAutonomousMoods" data-config-key="botAutonomousMoods" checked />
+          <label for="cfg-botAutonomousMoods">Autonomous Moods &amp; Arcs [MOOD]</label>
+        </div>
+        <div class="setting-field checkbox-row">
+          <input type="checkbox" id="cfg-dynamicRelationsEnabled" data-config-key="dynamicRelationsEnabled" checked />
+          <label for="cfg-dynamicRelationsEnabled">Dynamic Rivalry/Affinity Shifts</label>
+        </div>
+        <div class="setting-field">
+          <label for="cfg-moodDecayTurns">Mood Arc Duration (1..15 turns)</label>
+          <input type="number" id="cfg-moodDecayTurns" data-config-key="moodDecayTurns" min="1" max="15" step="1" value="4" />
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>⚡ Turn Chaining &amp; Organic Pacing</legend>
+        <div class="setting-field">
+          <label for="cfg-minSpeakersPerTurn">Min Speakers / Turn (1..4)</label>
+          <input type="number" id="cfg-minSpeakersPerTurn" data-config-key="minSpeakersPerTurn" min="1" max="4" step="1" value="1" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-maxSpeakersPerTurn">Max Speakers / Turn (1..6)</label>
+          <input type="number" id="cfg-maxSpeakersPerTurn" data-config-key="maxSpeakersPerTurn" min="1" max="6" step="1" value="3" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-continuationProb">Continuation Prob (0.0..1.0)</label>
+          <input type="number" id="cfg-continuationProb" data-config-key="continuationProb" min="0" max="1" step="0.05" value="0.65" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-continuationDecay">Continuation Decay (0.0..0.9)</label>
+          <input type="number" id="cfg-continuationDecay" data-config-key="continuationDecay" min="0" max="0.9" step="0.05" value="0.25" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-readingDelayMs">Reading Delay (ms)</label>
+          <input type="number" id="cfg-readingDelayMs" data-config-key="readingDelayMs" min="0" max="5000" step="50" value="450" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-interSpeakerDelayMs">Inter-Speaker Delay (ms)</label>
+          <input type="number" id="cfg-interSpeakerDelayMs" data-config-key="interSpeakerDelayMs" min="0" max="8000" step="50" value="900" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-humanDebounceMs">Human Debounce (ms)</label>
+          <input type="number" id="cfg-humanDebounceMs" data-config-key="humanDebounceMs" min="0" max="3000" step="50" value="550" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-humanInterruptMode">Human Interrupt Mode</label>
+          <select id="cfg-humanInterruptMode" data-config-key="humanInterruptMode">
+            <option value="yield">yield (finish active bot)</option>
+            <option value="abort">abort (stop immediately)</option>
+            <option value="queue">queue</option>
+          </select>
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>🎯 Director &amp; Speaker Routing</legend>
+        <div class="setting-field">
+          <label for="cfg-directorMode">Director Strategy</label>
+          <select id="cfg-directorMode" data-config-key="directorMode">
+            <option value="hybrid">hybrid (LLM + Heuristics)</option>
+            <option value="llm">llm</option>
+            <option value="heuristic">heuristic (Deterministic)</option>
+          </select>
+        </div>
+        <div class="setting-field">
+          <label for="cfg-talkativenessWeight">Talkativeness Weight (0..1)</label>
+          <input type="number" id="cfg-talkativenessWeight" data-config-key="talkativenessWeight" min="0" max="1" step="0.05" value="0.6" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-recencyPenalty">Recency Cooldown Penalty (0..1)</label>
+          <input type="number" id="cfg-recencyPenalty" data-config-key="recencyPenalty" min="0" max="1" step="0.05" value="0.7" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-joinReactionProb">Join Greeting/Roast Prob (0..1)</label>
+          <input type="number" id="cfg-joinReactionProb" data-config-key="joinReactionProb" min="0" max="1" step="0.05" value="0.6" />
+        </div>
+        <div class="setting-field checkbox-row">
+          <input type="checkbox" id="cfg-botMentionChaining" data-config-key="botMentionChaining" checked />
+          <label for="cfg-botMentionChaining">Bot @Mention Chaining</label>
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>🌌 Ambient Background Life &amp; Roaming</legend>
+        <div class="setting-field checkbox-row">
+          <input type="checkbox" id="cfg-ambientEnabled" data-config-key="ambientEnabled" checked />
+          <label for="cfg-ambientEnabled">Ambient Chatter Enabled</label>
+        </div>
+        <div class="setting-field">
+          <label for="cfg-ambientIdleSec">Idle Wait (5..600 sec)</label>
+          <input type="number" id="cfg-ambientIdleSec" data-config-key="ambientIdleSec" min="5" max="600" step="5" value="35" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-ambientIntervalSec">Check Interval (5..600 sec)</label>
+          <input type="number" id="cfg-ambientIntervalSec" data-config-key="ambientIntervalSec" min="5" max="600" step="5" value="45" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-ambientProb">Ambient Trigger Prob (0..1)</label>
+          <input type="number" id="cfg-ambientProb" data-config-key="ambientProb" min="0" max="1" step="0.05" value="0.55" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-ambientMaxBurst">Max Burst Speakers (1..4)</label>
+          <input type="number" id="cfg-ambientMaxBurst" data-config-key="ambientMaxBurst" min="1" max="4" step="1" value="2" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-ambientMaxConsecutive">Safety Cap Bursts (1..10)</label>
+          <input type="number" id="cfg-ambientMaxConsecutive" data-config-key="ambientMaxConsecutive" min="1" max="10" step="1" value="2" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-ambientRoamProb">Cross-Channel Roam Prob (0..1)</label>
+          <input type="number" id="cfg-ambientRoamProb" data-config-key="ambientRoamProb" min="0" max="1" step="0.05" value="0" />
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>🧠 Episodic Lore, Memory &amp; Display</legend>
+        <div class="setting-field checkbox-row">
+          <input type="checkbox" id="cfg-autoLoreEnabled" data-config-key="autoLoreEnabled" checked />
+          <label for="cfg-autoLoreEnabled">Auto-Summarize Channel Lore</label>
+        </div>
+        <div class="setting-field">
+          <label for="cfg-autoLoreInterval">Auto-Lore Interval (4..50 msgs)</label>
+          <input type="number" id="cfg-autoLoreInterval" data-config-key="autoLoreInterval" min="4" max="50" step="1" value="16" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-contextMessages">Prompt Context Window (6..60 msgs)</label>
+          <input type="number" id="cfg-contextMessages" data-config-key="contextMessages" min="6" max="60" step="2" value="24" />
+        </div>
+        <div class="setting-field">
+          <label for="cfg-responseStyle">Bot Response Style</label>
+          <select id="cfg-responseStyle" data-config-key="responseStyle">
+            <option value="terse">terse (1 line)</option>
+            <option value="irc">irc (1-3 sentences)</option>
+            <option value="expressive">expressive (2-5 sentences)</option>
+          </select>
+        </div>
+        <div class="setting-field">
+          <label for="cfg-thinkingDisplay">Thinking Trace Display</label>
+          <select id="cfg-thinkingDisplay" data-config-key="thinkingDisplay">
+            <option value="compact">compact</option>
+            <option value="expanded">expanded</option>
+            <option value="hidden">hidden</option>
+          </select>
+        </div>
+      </fieldset>
+    </div>
+  </dialog>
 
   <script>
     const params = new URLSearchParams(window.location.search);
@@ -490,6 +769,9 @@ export function renderWebClientHtml(): string {
     const coopPadEl = document.getElementById("coop-pad");
     const padStatusEl = document.getElementById("pad-status");
     const padImagineBtn = document.getElementById("pad-imagine-btn");
+    const settingsDialog = document.getElementById("settings-dialog");
+    const openSettingsBtn = document.getElementById("open-settings-btn");
+    const drawerSettingsBtn = document.getElementById("drawer-settings-btn");
 
     let messages = new Map();
     let currentConfig = { preset: "lively", ambientEnabled: true, thinkingDisplay: "compact" };
@@ -593,6 +875,7 @@ export function renderWebClientHtml(): string {
         document.querySelectorAll("button[data-preset]").forEach(btn => {
           btn.classList.toggle("active-preset", btn.getAttribute("data-preset") === state.config.preset);
         });
+        syncSettingsDialog(state.config);
       }
       const provPrefix = state.activeProvider ? state.activeProvider + ":" : "";
       engineEl.textContent = "Engine: " + provPrefix + state.engineModel;
@@ -753,10 +1036,66 @@ export function renderWebClientHtml(): string {
       statusEl.textContent = "Disconnected from host server.";
     };
 
+    function syncSettingsDialog(cfg) {
+      if (!cfg) return;
+      document.querySelectorAll("[data-config-key]").forEach(el => {
+        const k = el.getAttribute("data-config-key");
+        if (!k || !(k in cfg)) return;
+        if (el.type === "checkbox") {
+          el.checked = Boolean(cfg[k]);
+        } else if (document.activeElement !== el) {
+          el.value = String(cfg[k]);
+        }
+      });
+    }
+
+    function openSettingsModal() {
+      if (settingsDialog && typeof settingsDialog.showModal === "function") {
+        syncSettingsDialog(currentConfig);
+        settingsDialog.showModal();
+      }
+    }
+
+    if (openSettingsBtn) {
+      openSettingsBtn.addEventListener("click", openSettingsModal);
+    }
+    if (drawerSettingsBtn) {
+      drawerSettingsBtn.addEventListener("click", openSettingsModal);
+    }
+    if (settingsDialog) {
+      if (!("closedBy" in HTMLDialogElement.prototype)) {
+        settingsDialog.addEventListener("click", (e) => {
+          if (e.target !== settingsDialog) return;
+          const r = settingsDialog.getBoundingClientRect();
+          if (
+            e.clientX < r.left ||
+            e.clientX > r.right ||
+            e.clientY < r.top ||
+            e.clientY > r.bottom
+          ) {
+            settingsDialog.close("dismiss");
+          }
+        });
+      }
+      settingsDialog.addEventListener("change", (ev) => {
+        const el = ev.target.closest("[data-config-key]");
+        if (!el || ws.readyState !== WebSocket.OPEN) return;
+        const k = el.getAttribute("data-config-key");
+        const val = el.type === "checkbox" ? String(el.checked) : String(el.value);
+        ws.send(JSON.stringify({ type: "command", raw: "/config set " + k + " " + val }));
+      });
+    }
+
     formEl.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = inputEl.value.trim();
       if (!text || ws.readyState !== WebSocket.OPEN) return;
+      const lower = text.toLowerCase();
+      if (lower === "/settings" || lower === "/menu" || lower === "/options") {
+        openSettingsModal();
+        inputEl.value = "";
+        return;
+      }
       if (text.startsWith("/")) {
         ws.send(JSON.stringify({ type: "command", raw: text }));
       } else {

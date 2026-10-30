@@ -6,12 +6,13 @@ import type {
   AutocompleteSuggestions,
   SlashCommand,
 } from "@mariozechner/pi-tui";
-import type { Persona, SimPresetId } from "../types.ts";
+import type { Persona, SimConfigCategory, SimPresetId } from "../types.ts";
 import { formatMoodBadge, MOOD_PRESETS } from "./moods.ts";
 import { formatAffinityBadge } from "./relations.ts";
 import { type Room, VIBE_PRESETS } from "./room.ts";
 import {
   BUILTIN_SCENARIOS,
+  SIM_CATEGORY_LABELS,
   SIM_PRESETS,
   SIM_VARIABLE_DESCRIPTORS,
 } from "./sim-config.ts";
@@ -22,6 +23,7 @@ export interface CommandExecutionContext {
   locked?: boolean;
   notifyCaller?: (text: string) => void;
   onQuit?: () => void;
+  onOpenSettings?: () => void;
   onChangeNick?: (newNick: string) => void;
   onSwitchChannel?: (channelName: string) => void;
   onListChannels?: () => void;
@@ -370,13 +372,15 @@ export const COMMANDS: CommandDefinition[] = [
         const lines = [
           `═══ Simulation Configuration for ${room.channelName} [Preset: ${c.preset.toUpperCase()}] ═══`,
           `  • Turn Chaining:     minSpeakersPerTurn=${c.minSpeakersPerTurn} │ maxSpeakersPerTurn=${c.maxSpeakersPerTurn} │ continuationProb=${c.continuationProb} │ continuationDecay=${c.continuationDecay}`,
-          `  • Speaker Selection: directorMode=${c.directorMode} │ talkativenessWeight=${c.talkativenessWeight} │ recencyPenalty=${c.recencyPenalty} │ botMentionChaining=${c.botMentionChaining}`,
+          `  • Speaker Selection: directorMode=${c.directorMode} │ talkativenessWeight=${c.talkativenessWeight} │ recencyPenalty=${c.recencyPenalty} │ botMentionChaining=${c.botMentionChaining} │ joinReactionProb=${c.joinReactionProb}`,
           `  • Organic Pacing:    readingDelayMs=${c.readingDelayMs}ms │ interSpeakerDelayMs=${c.interSpeakerDelayMs}ms │ humanDebounceMs=${c.humanDebounceMs}ms │ humanInterruptMode=${c.humanInterruptMode}`,
-          `  • Ambient Life:      ambientEnabled=${c.ambientEnabled} │ ambientIdleSec=${c.ambientIdleSec}s │ ambientIntervalSec=${c.ambientIntervalSec}s │ ambientProb=${c.ambientProb} │ ambientMaxBurst=${c.ambientMaxBurst} │ ambientMaxConsecutive=${c.ambientMaxConsecutive} (used: ${room.ambientConsecutiveCount}/${c.ambientMaxConsecutive})`,
-          `  • Social & Format:   joinReactionProb=${c.joinReactionProb} │ contextMessages=${c.contextMessages} │ responseStyle=${c.responseStyle} │ thinkingDisplay=${c.thinkingDisplay}`,
+          `  • Ambient Life:      ambientEnabled=${c.ambientEnabled} │ ambientIdleSec=${c.ambientIdleSec}s │ ambientIntervalSec=${c.ambientIntervalSec}s │ ambientProb=${c.ambientProb} │ ambientMaxBurst=${c.ambientMaxBurst} │ ambientMaxConsecutive=${c.ambientMaxConsecutive} (used: ${room.ambientConsecutiveCount}/${c.ambientMaxConsecutive}) │ ambientRoamProb=${c.ambientRoamProb}`,
+          `  • Emergent AI:       botAutonomousReactions=${c.botAutonomousReactions} │ botAutonomousImagine=${c.botAutonomousImagine} │ botAutonomousMoods=${c.botAutonomousMoods} │ dynamicRelationsEnabled=${c.dynamicRelationsEnabled} │ moodDecayTurns=${c.moodDecayTurns}`,
+          `  • Memory & Display:  autoLoreEnabled=${c.autoLoreEnabled} │ autoLoreInterval=${c.autoLoreInterval} │ contextMessages=${c.contextMessages} │ responseStyle=${c.responseStyle} │ thinkingDisplay=${c.thinkingDisplay}`,
           "",
+          "Interactive Menu: /settings (or press Ctrl+O in Terminal TUI / click ⚙️ Settings in Web Client)",
           "Presets: /config preset <manual | chill | lively | banter | chaos>",
-          "Granular: /config set <key> <value> (e.g. /config set maxSpeakersPerTurn 4 or /config set ambientEnabled false)",
+          "Granular: /config set <key> <value> (e.g. /config set botAutonomousImagine false or /config set maxSpeakersPerTurn 4)",
         ];
         replyToCaller(room, ctx, lines.join("\n"));
         return;
@@ -440,6 +444,102 @@ export const COMMANDS: CommandDefinition[] = [
           err instanceof Error ? err.message : String(err)
         );
       }
+    },
+  },
+  {
+    name: "settings",
+    aliases: ["menu", "options"],
+    argumentHint: "[pacing|director|ambient|emergent|memory|display | <key> <val>]",
+    description:
+      "Open the interactive Settings Control Center (Ctrl+O) or inspect/toggle categorized simulation features",
+    hostOnlyWhenLocked: true,
+    getArgumentCompletions: (prefix, room) => {
+      const trimmed = prefix.trimStart();
+      const categories = Object.entries(SIM_CATEGORY_LABELS).map(
+        ([cat, title]) => ({
+          value: cat,
+          label: `🗂️ ${cat}`,
+          description: title,
+        })
+      );
+      const descriptors = SIM_VARIABLE_DESCRIPTORS.map((d) => ({
+        value: `${d.key} `,
+        label: `⚙️ ${d.key} (${d.label}: ${String(room.config[d.key])})`,
+        description: `[${d.category}] ${d.description}`,
+      }));
+      return filterItems([...categories, ...descriptors], trimmed);
+    },
+    execute: (args, room, ctx) => {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      if (parts.length === 0 && ctx?.onOpenSettings) {
+        ctx.onOpenSettings();
+        return;
+      }
+
+      const first = parts[0]?.toLowerCase();
+      if (parts.length >= 2 && first) {
+        try {
+          const res = room.updateConfigValue(first, parts[1]!);
+          room.addSystemMessage(
+            `⚙️ Updated ${room.channelName} setting: ${res.key} = ${String(res.value)} (${res.description})`,
+            "event"
+          );
+        } catch (err) {
+          replyToCaller(
+            room,
+            ctx,
+            err instanceof Error ? err.message : String(err)
+          );
+        }
+        return;
+      }
+
+      const filterCat =
+        first && first in SIM_CATEGORY_LABELS
+          ? (first as SimConfigCategory)
+          : undefined;
+
+      // If single argument is a boolean key, toggle it!
+      if (first && !filterCat) {
+        const desc = SIM_VARIABLE_DESCRIPTORS.find(
+          (d) => d.key.toLowerCase() === first
+        );
+        if (desc && desc.type === "boolean") {
+          const nextBool = !room.config[desc.key];
+          const res = room.updateConfigValue(desc.key, String(nextBool));
+          room.addSystemMessage(
+            `⚙️ Toggled ${room.channelName} setting: ${res.key} = ${String(res.value)} (${res.description})`,
+            "event"
+          );
+          return;
+        }
+      }
+
+      const categories = filterCat
+        ? [filterCat]
+        : (Object.keys(SIM_CATEGORY_LABELS) as SimConfigCategory[]);
+
+      const lines = [
+        `⚙️ ═══ Granular Feature & Simulation Settings for ${room.channelName} [Preset: ${room.config.preset.toUpperCase()}] ═══`,
+      ];
+      for (const cat of categories) {
+        lines.push(`\n  ▸ ${SIM_CATEGORY_LABELS[cat]} [${cat}]:`);
+        const group = SIM_VARIABLE_DESCRIPTORS.filter((d) => d.category === cat);
+        for (const d of group) {
+          const val = room.config[d.key];
+          const badge =
+            typeof val === "boolean"
+              ? val
+                ? "✅ ON "
+                : "○ OFF"
+              : String(val);
+          lines.push(`    • ${d.key.padEnd(24)} = ${badge.padEnd(8)} — ${d.description}`);
+        }
+      }
+      lines.push(
+        `\n  Tip: Run "/settings <booleanKey>" to toggle, "/config set <key> <val>" to set any variable, or press Ctrl+O (TUI) / click "⚙️ Settings" (Web) for the interactive menu!`
+      );
+      replyToCaller(room, ctx, lines.join("\n"));
     },
   },
   {

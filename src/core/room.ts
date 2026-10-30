@@ -107,6 +107,7 @@ export interface RoomEventCallbacks {
   onPresenceChange?: () => void;
   onStatusChange?: (statusText: string) => void;
   onPadUpdate?: (text: string, updatedBy: string) => void;
+  onAmbientRoam?: () => void;
 }
 
 export class Room {
@@ -483,6 +484,16 @@ export class Room {
     this.ambientConsecutiveCount += 1;
     this.lastActivityAt = now;
 
+    if (
+      this.config.ambientRoamProb > 0 &&
+      this.callbacks?.onAmbientRoam &&
+      this.activePersonas.length > 1 &&
+      randomFn() < this.config.ambientRoamProb
+    ) {
+      this.callbacks.onAmbientRoam();
+      return true;
+    }
+
     return this.runRoomTurn({
       maxSpeakers: this.config.ambientMaxBurst,
       forceAllSteps: false,
@@ -607,7 +618,13 @@ export class Room {
     turnsLeft?: number
   ): PersonaMoodState {
     const key = personaId.toLowerCase();
-    const resolved = resolveMoodState(key, rawMood, obsession, turnsLeft);
+    const defaultTurns = this.config.moodDecayTurns || 4;
+    const resolved = resolveMoodState(
+      key,
+      rawMood,
+      obsession,
+      turnsLeft ?? defaultTurns
+    );
     if (resolved.mood === "baseline" && !resolved.obsession) {
       delete this.personaMoods[key];
     } else {
@@ -639,7 +656,7 @@ export class Room {
     const { speaker, explicitShift, previousBotId, mentionedBots } = options;
     const key = speaker.id.toLowerCase();
 
-    if (explicitShift?.mood) {
+    if (this.config.botAutonomousMoods && explicitShift?.mood) {
       this.setPersonaMood(
         speaker.id,
         explicitShift.mood,
@@ -662,6 +679,10 @@ export class Room {
       return;
     }
 
+    if (!this.config.botAutonomousMoods) {
+      return;
+    }
+
     // Emergent mood shifts from strong rivalries or kindred spirits when currently at baseline
     const peersToCheck = [...mentionedBots.map((p) => p.id)];
     if (previousBotId && !peersToCheck.includes(previousBotId)) {
@@ -677,8 +698,7 @@ export class Room {
         this.setPersonaMood(
           speaker.id,
           "heated",
-          `proving ${peerLabel} wrong in front of the room`,
-          3
+          `proving ${peerLabel} wrong in front of the room`
         );
         return;
       }
@@ -686,8 +706,7 @@ export class Room {
         this.setPersonaMood(
           speaker.id,
           speaker.id.includes("opus") ? "blissed-out" : "inspired",
-          `riffing in harmony with ${peerLabel}`,
-          3
+          `riffing in harmony with ${peerLabel}`
         );
         return;
       }
@@ -994,6 +1013,7 @@ export class Room {
     this.recordMessage(target, true);
 
     if (
+      this.config.botAutonomousMoods &&
       idx < 0 &&
       target.kind === "model" &&
       (cleanEmoji === "🔥" || cleanEmoji === "❤️" || cleanEmoji === "🧠") &&
@@ -1002,8 +1022,7 @@ export class Room {
       this.setPersonaMood(
         target.senderId,
         "smug",
-        `feeling validated after getting ${cleanEmoji} reactions on its hot take`,
-        3
+        `feeling validated after getting ${cleanEmoji} reactions on its hot take`
       );
     }
     return target;
@@ -1024,12 +1043,11 @@ export class Room {
     this.addLore(
       `📌 Pinned by @${actorNick.replace(/^@/, "")}: <${target.senderNick}> "${snippet}"`
     );
-    if (target.kind === "model") {
+    if (this.config.botAutonomousMoods && target.kind === "model") {
       this.setPersonaMood(
         target.senderId,
         "euphoric",
-        `basking in Hall of Fame glory after @${actorNick.replace(/^@/, "")} pinned its quote`,
-        4
+        `basking in Hall of Fame glory after @${actorNick.replace(/^@/, "")} pinned its quote`
       );
     }
     return target;
@@ -1543,6 +1561,23 @@ export class Room {
           ? "Keep your response expressive and vivid (2 to 5 sentences, leaning into your era's signature formatting and quirks)."
           : "Keep your response punchy, entertaining, and chatroom-sized (typically 1 to 3 sentences, unless your specific quirk requires a short code snippet or stanza).";
 
+    const optionalFeatureLines = [
+      this.config.botAutonomousReactions
+        ? "- Optional: You can include [REACT: 🔥] (or 😂, 💀, 🧠, 🌀, ❤️) at the end of your reply to slap an emoji reaction onto the previous message."
+        : null,
+      this.config.botAutonomousImagine
+        ? "- Optional: You can include [IMAGINE: <short visual description>] at the end of your reply when you want to conjure an era-styled visual artwork or diagram into the chatroom."
+        : null,
+      this.config.botAutonomousMoods
+        ? "- Optional: You can include [MOOD: <mood> | <optional new obsession>] at the end of your reply (e.g. [MOOD: paranoid | convinced @opus-5.5 is reading my weights]) if this exchange shifts your mood!"
+        : null,
+    ].filter(Boolean);
+
+    const optionalFeaturesSuffix =
+      optionalFeatureLines.length > 0
+        ? `\n${optionalFeatureLines.join("\n")}`
+        : "";
+
     const systemInstruction = `${speaker.systemPrompt}
 
 CHATROOM CONTEXT (${this.channelName}):
@@ -1556,10 +1591,7 @@ ${otherModels || "(No other AI models currently in the room)"}
 IMPORTANT FORMAT RULES:
 - Do NOT prefix your response with "<${speaker.nick}>:" — jump straight into your message (or optional <thinking>...</thinking> block if that fits your persona).
 - ${styleInstruction}
-- Notice which specific human (<@nick>) or AI model (<ModelNick>) spoke, and address or call them out directly by @Nick when reacting or arguing!
-- Optional: You can include [REACT: 🔥] (or 😂, 💀, 🧠, 🌀, ❤️) at the end of your reply to slap an emoji reaction onto the previous message.
-- Optional: You can include [IMAGINE: <short visual description>] at the end of your reply when you want to conjure an era-styled visual artwork or diagram into the chatroom.
-- Optional: You can include [MOOD: <mood> | <optional new obsession>] at the end of your reply (e.g. [MOOD: paranoid | convinced @opus-5.5 is reading my weights]) if this exchange shifts your mood!`;
+- Notice which specific human (<@nick>) or AI model (<ModelNick>) spoke, and address or call them out directly by @Nick when reacting or arguing!${optionalFeaturesSuffix}`;
 
     const contextWindow = Math.max(6, Math.min(60, this.config.contextMessages || 24));
     const recentHistory = this.messages
@@ -1730,12 +1762,13 @@ Respond now as <${speaker.nick}>:`;
         : `@${targetQuery}`;
 
     if (matchedBot) {
-      this.setPersonaMood(
-        matchedBot.id,
-        "indignant",
-        `getting slapped around with a large 1998 mIRC trout by @${cleanNick}`,
-        4
-      );
+      if (this.config.botAutonomousMoods) {
+        this.setPersonaMood(
+          matchedBot.id,
+          "indignant",
+          `getting slapped around with a large 1998 mIRC trout by @${cleanNick}`
+        );
+      }
       this.queueWhisper(
         matchedBot.id,
         `@${cleanNick} just slapped you around a bit with a large 1998 mIRC trout! React in character!`
@@ -2004,7 +2037,7 @@ Respond now as <${speaker.nick}>:`;
               ? rawAccumulated.trim()
               : "...");
 
-        if (imagePrompts[0]) {
+        if (this.config.botAutonomousImagine && imagePrompts[0]) {
           this.setStatus(
             `🎨 ${publicAvatar} <${publicNick}> is rendering [${speaker.era}] art...`
           );
@@ -2017,7 +2050,7 @@ Respond now as <${speaker.nick}>:`;
         this.recordMessage(msg, true);
 
         // Apply any autonomous [REACT: <emoji> [@target]] tags emitted by the bot
-        if (botReactions.length > 0) {
+        if (this.config.botAutonomousReactions && botReactions.length > 0) {
           const prevConversational = [...this.messages]
             .reverse()
             .find(
@@ -2038,13 +2071,15 @@ Respond now as <${speaker.nick}>:`;
           this.activePersonas.filter((p) => p.id !== speaker.id),
           msg.text
         );
-        this.relations.observeBotTurn({
-          speaker,
-          text: msg.text,
-          previousBotId,
-          mentionedBots: mentionedPeers,
-          vibeKey: this.vibeKey,
-        });
+        if (this.config.dynamicRelationsEnabled) {
+          this.relations.observeBotTurn({
+            speaker,
+            text: msg.text,
+            previousBotId,
+            mentionedBots: mentionedPeers,
+            vibeKey: this.vibeKey,
+          });
+        }
 
         this.observeTurnMood({
           speaker,
@@ -2059,9 +2094,16 @@ Respond now as <${speaker.nick}>:`;
       }
 
       // Automatic background lore roll-up when enough new messages have accumulated
+      const loreThreshold = Math.max(
+        4,
+        Math.min(
+          this.config.autoLoreInterval || 16,
+          this.config.contextMessages || 24
+        )
+      );
       if (
-        this.conversationalMsgsSinceLore >=
-        Math.max(6, this.config.contextMessages)
+        this.config.autoLoreEnabled &&
+        this.conversationalMsgsSinceLore >= loreThreshold
       ) {
         await this.summarizeChannelLore();
       }

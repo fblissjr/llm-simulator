@@ -2,6 +2,7 @@ import type {
   EditorTheme,
   MarkdownTheme,
   SelectListTheme,
+  SettingsListTheme,
 } from "@mariozechner/pi-tui";
 import chalk from "chalk";
 import type { Room } from "../core/room.ts";
@@ -13,6 +14,18 @@ export const selectListTheme: SelectListTheme = {
   description: (t) => chalk.hex("#6272a4")(t),
   scrollInfo: (t) => chalk.dim(t),
   noMatch: (t) => chalk.hex("#ff5555")(t),
+};
+
+export const settingsListTheme: SettingsListTheme = {
+  label: (text, selected) =>
+    selected ? chalk.hex("#50fa7b").bold(text) : chalk.hex("#f8f8f2")(text),
+  value: (text, selected) =>
+    selected
+      ? chalk.bgHex("#44475a").hex("#f1fa8c").bold(` ${text} `)
+      : chalk.hex("#8be9fd")(text),
+  description: (text) => chalk.hex("#bd93f9").italic(text),
+  cursor: chalk.hex("#50fa7b").bold("▸ "),
+  hint: (text) => chalk.hex("#6272a4")(text),
 };
 
 export const editorTheme: EditorTheme = {

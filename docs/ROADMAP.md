@@ -2,11 +2,12 @@
 
 ## 1. Living Chatroom Architecture & Granular `SimConfig`
 
-Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) maintains its own `SimConfig` persisted in SQLite (`channels.config_json`). You can switch between **5 cohesive presets** in one command or tune any of the **19 granular simulation variables** live during a session.
+Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) maintains its own `SimConfig` persisted in SQLite (`channels.config_json`). You can switch between **5 cohesive presets** in one command or tune any of the **30 granular simulation variables** live during a session via `/settings` (`Ctrl+O` in TUI / `⚙️ Settings` modal in Web UI) or `/config`.
 
 ### Quick Commands
 
 ```text
+/settings [pacing|director|ambient|emergent|memory|display] # Open interactive Settings Menu (Ctrl+O)
 /config                                     # View all current simulation variables for the channel
 /config preset <manual|chill|lively|banter|chaos>
 /config set <key> <value>                   # e.g. /config set maxSpeakersPerTurn 4
@@ -60,7 +61,15 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 | `ambientProb` | `0.0..1.0` | `0.55` | Probability an ambient tick triggers a spontaneous exchange |
 | `ambientMaxBurst` | `1..4` | `2` | Max speakers per ambient burst |
 | `ambientMaxConsecutive` | `1..10` | `2` | **Safety Cap**: Max ambient bursts without human input before auto-pausing |
+| `ambientRoamProb` | `0.0..1.0` | `0.00` | Probability an idle ambient tick wanders a bot into another channel on multi-channel hubs |
 | `joinReactionProb` | `0.0..1.0` | `0.60` | Chance an existing bot greets/roasts a newly `/summon`ed bot |
+| `botAutonomousReactions` | `boolean` | `true` | Allow bots to autonomously slap `[REACT: 🔥]` emoji reactions onto messages |
+| `botAutonomousImagine` | `boolean` | `true` | Allow bots to autonomously conjure `[IMAGINE: ...]` era-styled artwork during turns |
+| `botAutonomousMoods` | `boolean` | `true` | Allow bots to shift emotional moods & obsessions via `[MOOD: ...]` tags and room triggers |
+| `dynamicRelationsEnabled` | `boolean` | `true` | Allow bot turns to dynamically shift inter-persona `RelationGraph` affinities |
+| `moodDecayTurns` | `1..15` | `4` | Default number of speaking turns before an emergent mood/obsession decays |
+| `autoLoreEnabled` | `boolean` | `true` | Automatically roll up memorable channel moments into episodic `lore` |
+| `autoLoreInterval` | `4..50` | `16` | Number of conversational messages between automatic episodic `lore` roll-ups |
 | `contextMessages` | `6..60` | `24` | Number of recent channel messages fed into persona prompts |
 | `responseStyle` | `terse \| irc \| expressive` | `irc` | Controls prompt response length (`terse` = 1 line, `irc` = 1–3 sentences, `expressive` = 2–5 sentences) |
 | `thinkingDisplay` | `expanded \| compact \| hidden` | `compact` | How `<thinking>` traces render in TUI and Web UI |
@@ -116,3 +125,11 @@ Every persistent channel (`#latent-space`, `#roast-pit`, `#arpanet-1972`, etc.) 
 - **`/mood` Command & TUI / Web UI Badges**:
   - `/mood` inspects all active personas' moods and obsessions, `/mood <model> <mood> [obsession...]` sets or nudges a persona's state, and `/mood reset [model]` resets to baseline.
   - Live `[emoji mood]` badges appear next to bots in the Terminal TUI header (`renderIrcHeader`) and on `@Bot` pills in the Browser Web Client.
+
+### Phase 8 — Granular Feature Controls & Interactive Settings Menus (`/settings`) ✅ (Implemented)
+- **30 Categorized `SimConfig` Variables Across 6 Groups (`pacing`, `director`, `ambient`, `emergent`, `memory`, `display`)**:
+  - Added granular emergent feature toggles and knobs (`botAutonomousReactions`, `botAutonomousImagine`, `botAutonomousMoods`, `dynamicRelationsEnabled`, `moodDecayTurns`, `autoLoreEnabled`, `autoLoreInterval`, `ambientRoamProb`) enforced directly in `Room`.
+- **Interactive Terminal TUI Settings Control Center (`/settings` or `Ctrl+O`)**:
+  - Uses `@mariozechner/pi-tui`'s `SettingsList` inside a centered TUI overlay modal (`ChatroomApp.openSettingsMenu`) so players can arrow through all 31 items (preset + 30 granular variables), press `Enter`/`Space` to cycle or toggle values live (both locally and over WebSockets), and press `Esc` or `Ctrl+O` to return to chat.
+- **Browser Web Client `<dialog id="settings-dialog">` Control Center**:
+  - Native modal `<dialog closedby="any" aria-labelledby="settings-title">` opened via the header `⚙️ Settings` button, the Sim Config drawer, or typing `/settings` in chat, featuring categorized `<fieldset>` controls synced in real time across all 4 co-op players.

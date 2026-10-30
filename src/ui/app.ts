@@ -1,7 +1,11 @@
 import {
+  type Component,
   Editor,
   matchesKey,
+  type OverlayHandle,
   ProcessTerminal,
+  type SettingItem,
+  SettingsList,
   Text,
   TUI,
 } from "@mariozechner/pi-tui";
@@ -11,13 +15,51 @@ import {
   handleSlashCommand,
 } from "../core/commands.ts";
 import { Room } from "../core/room.ts";
+import {
+  getVariableMenuValues,
+  SIM_VARIABLE_DESCRIPTORS,
+} from "../core/sim-config.ts";
 import type { ChannelHub } from "../server/hub.ts";
 import type { ClientPacket, ServerPacket } from "../types.ts";
 import {
   editorTheme,
   formatChatMessage,
   renderIrcHeader,
+  settingsListTheme,
 } from "./theme.ts";
+
+class SettingsModalComponent implements Component {
+  constructor(
+    private titleFn: () => string,
+    public readonly list: SettingsList
+  ) {}
+
+  invalidate(): void {
+    this.list.invalidate();
+  }
+
+  handleInput(data: string): void {
+    this.list.handleInput(data);
+  }
+
+  render(width: number): string[] {
+    const innerWidth = Math.max(24, width - 4);
+    const border = chalk.hex("#bd93f9")("═".repeat(Math.max(10, width - 2)));
+    const header = chalk.bgHex("#282a36").hex("#50fa7b").bold(` ${this.titleFn()} `);
+    const sub = chalk.hex("#6272a4")(
+      "  ↑/↓ navigate • Enter/Space cycle value • Esc or Ctrl+O close"
+    );
+    const bodyLines = this.list.render(innerWidth);
+    return [
+      chalk.hex("#bd93f9")(`╔${border}╗`),
+      `  ${header}`,
+      sub,
+      "",
+      ...bodyLines.map((l) => `  ${l}`),
+      chalk.hex("#bd93f9")(`╚${border}╝`),
+    ];
+  }
+}
 
 export interface ChatroomAppOptions {
   room?: Room;
@@ -55,6 +97,8 @@ export class ChatroomApp {
   private feedView: Text;
   private statusView: Text;
   private editor: Editor;
+  private settingsOverlay: OverlayHandle | null = null;
+  private settingsModal: SettingsModalComponent | null = null;
 
   constructor(roomOrOptions?: Room | ChatroomAppOptions) {
     const opts: ChatroomAppOptions =
@@ -359,6 +403,19 @@ export class ChatroomApp {
         return { consume: true };
       }
 
+      if (matchesKey(data, "ctrl+o")) {
+        if (this.isSettingsOpen()) {
+          this.closeSettingsMenu();
+        } else {
+          this.openSettingsMenu();
+        }
+        return { consume: true };
+      }
+
+      if (this.isSettingsOpen()) {
+        return undefined;
+      }
+
       if (matchesKey(data, "pageUp")) {
         const maxOffset = Math.max(0, this.room.messages.length - 10);
         this.scrollOffset = Math.min(maxOffset, this.scrollOffset + 10);
@@ -414,9 +471,117 @@ export class ChatroomApp {
     });
   }
 
+  public getSettingsItems(): SettingItem[] {
+    const items: SettingItem[] = [
+      {
+        id: "preset",
+        label: "[preset] Room Pacing Preset",
+        currentValue: String(this.room.config.preset),
+        values: ["manual", "chill", "lively", "banter", "chaos"],
+        description:
+          "Switch overall room pacing preset (manual | chill | lively | banter | chaos)",
+      },
+    ];
+
+    for (const d of SIM_VARIABLE_DESCRIPTORS) {
+      items.push({
+        id: d.key,
+        label: `[${d.category}] ${d.label}`,
+        currentValue: String(this.room.config[d.key]),
+        values: getVariableMenuValues(d),
+        description: `${d.key}: ${d.description}`,
+      });
+    }
+    return items;
+  }
+
+  public isSettingsOpen(): boolean {
+    return this.settingsOverlay !== null && !this.settingsOverlay.isHidden();
+  }
+
+  public openSettingsMenu(): void {
+    if (this.isSettingsOpen()) {
+      return;
+    }
+
+    const items = this.getSettingsItems();
+    const list = new SettingsList(
+      items,
+      14,
+      settingsListTheme,
+      (id, newValue) => {
+        const rawCmd =
+          id === "preset"
+            ? `/config preset ${newValue}`
+            : `/config set ${id} ${newValue}`;
+        if (this.wsUrl) {
+          this.sendClientPacket({ type: "command", raw: rawCmd });
+        } else {
+          void handleSlashCommand(rawCmd, this.room, {
+            senderNick: this.selfNick,
+            isHost: this.isHost,
+          }).then(() => {
+            this.refreshSettingsMenuValues();
+          });
+        }
+      },
+      () => {
+        this.closeSettingsMenu();
+      },
+      { enableSearch: false }
+    );
+
+    this.settingsModal = new SettingsModalComponent(
+      () =>
+        `⚙️ Simulation & Feature Control Center — ${this.room.channelName} [Preset: ${this.room.config.preset.toUpperCase()}]`,
+      list
+    );
+    this.settingsOverlay = this.tui.showOverlay(this.settingsModal, {
+      width: "85%",
+      minWidth: 56,
+      maxHeight: "85%",
+      anchor: "center",
+    });
+    this.syncViews();
+  }
+
+  public closeSettingsMenu(): void {
+    if (this.settingsOverlay) {
+      this.settingsOverlay.hide();
+      this.settingsOverlay = null;
+      this.settingsModal = null;
+    }
+    this.tui.setFocus(this.editor);
+    this.syncViews();
+  }
+
+  private refreshSettingsMenuValues(): void {
+    if (!this.settingsModal) return;
+    this.settingsModal.list.updateValue(
+      "preset",
+      String(this.room.config.preset)
+    );
+    for (const d of SIM_VARIABLE_DESCRIPTORS) {
+      this.settingsModal.list.updateValue(
+        d.key,
+        String(this.room.config[d.key])
+      );
+    }
+  }
+
   private async processInput(text: string): Promise<void> {
     if (text === "/quit" || text === "/exit") {
       this.quit();
+      return;
+    }
+
+    const cleanLower = text.trim().toLowerCase();
+    if (
+      cleanLower === "/settings" ||
+      cleanLower === "/menu" ||
+      cleanLower === "/options"
+    ) {
+      this.openSettingsMenu();
       return;
     }
 
@@ -434,6 +599,7 @@ export class ChatroomApp {
         senderNick: this.selfNick,
         isHost: this.isHost,
         onQuit: () => this.quit(),
+        onOpenSettings: () => this.openSettingsMenu(),
       });
       return;
     }
@@ -442,6 +608,7 @@ export class ChatroomApp {
   }
 
   private syncViews(): void {
+    this.refreshSettingsMenuValues();
     this.headerView.setText(
       renderIrcHeader(this.room, {
         selfNick: this.selfNick,
@@ -502,7 +669,7 @@ export class ChatroomApp {
           : "";
       this.statusView.setText(
         chalk.hex("#6272a4")(
-          `  ── [@${this.selfNick}]${scrollBadge}${typingBadge} Type a message or /command (Tab: autocomplete • Ctrl+T: thoughts • Esc: shush) ──`
+          `  ── [@${this.selfNick}]${scrollBadge}${typingBadge} Type a message or /command (Tab: autocomplete • Ctrl+O: settings • Ctrl+T: thoughts • Esc: shush) ──`
         )
       );
     }

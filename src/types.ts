@@ -46,6 +46,14 @@ export type ResponseStyle = "terse" | "irc" | "expressive";
 
 export type ThinkingDisplayMode = "expanded" | "compact" | "hidden";
 
+export type SimConfigCategory =
+  | "pacing"
+  | "director"
+  | "ambient"
+  | "emergent"
+  | "memory"
+  | "display";
+
 export interface SimConfig {
   preset: SimPresetId;
   minSpeakersPerTurn: number; // 1..4
@@ -66,7 +74,15 @@ export interface SimConfig {
   ambientProb: number; // 0.0..1.0
   ambientMaxBurst: number; // 1..4
   ambientMaxConsecutive: number; // 1..10
+  ambientRoamProb: number; // 0.0..1.0
   joinReactionProb: number; // 0.0..1.0
+  botAutonomousReactions: boolean;
+  botAutonomousImagine: boolean;
+  botAutonomousMoods: boolean;
+  dynamicRelationsEnabled: boolean;
+  moodDecayTurns: number; // 1..15
+  autoLoreEnabled: boolean;
+  autoLoreInterval: number; // 4..50
   contextMessages: number; // 6..60
   responseStyle: ResponseStyle;
   thinkingDisplay: ThinkingDisplayMode;
